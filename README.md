@@ -5,6 +5,7 @@
 **QoreGuard** is a unified, Apache-2.0 post-quantum security stack for autonomous AI agents operating on **QoreChain / QoreX** (`qorechain-diana`, EVM Chain ID `9800`). It pairs real NIST post-quantum cryptography (`@qorechain/pqc` FIPS-204 **ML-DSA-87 / ML-DSA-65**, FIPS-205 **SLH-DSA**, FIPS-202 **SHAKE-256**), on-chain **Scoped EVM Windows** & **30-day owner-to-agent link leases**, official **`qorechain-msg-v1|<chainId>|<data>`** hybrid `secp256k1 + ML-DSA-87` authenticated messaging, a 6-tool **Model Context Protocol** server (`qoreguard-mcp`), live QoreX Testnet precompile verification, and an interactive web console (`web/`).
 
 - **Live GitHub Pages Demo**: [https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/](https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/)
+- **8-Slide Judge Pitch Deck (PDF)**: [https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/qoreguard-deck.pdf](https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/qoreguard-deck.pdf) ([docs/qoreguard-deck.pdf](docs/qoreguard-deck.pdf))
 - **1080p Demo Video (YouTube, 108s)**: [https://www.youtube.com/watch?v=La_8Dh7TA04](https://www.youtube.com/watch?v=La_8Dh7TA04)
 - **1080p Demo Video Mirror (Google Drive)**: [https://drive.google.com/file/d/1luPFpSazP9o20nE1wC738ppocV_4eZUo/view?usp=sharing](https://drive.google.com/file/d/1luPFpSazP9o20nE1wC738ppocV_4eZUo/view?usp=sharing)
 - **Public Repository**: [https://github.com/alphonshhhomenicmtu/qoreguard-qorechain](https://github.com/alphonshhhomenicmtu/qoreguard-qorechain)
@@ -66,6 +67,7 @@ qoreguard/
 ├── web/                         # Interactive React 19 + Vite 6 + TypeScript console deployed to GitHub Pages (8 Vitest tests)
 ├── docs/
 │   ├── cover-image.png          # 1200x630 Featured Cover Image for QoreChain submission
+│   ├── qoreguard-deck.pdf       # 8-slide 16:9 Judge Pitch Deck PDF
 │   └── screenshots/             # Captured high-resolution UI screenshots
 ├── AI_USAGE.md                  # AI-assisted engineering disclosure (Best AI-Native Build)
 └── SUBMISSION_READY.md          # Complete QoreChain Developer Fest submission checklist & evidence

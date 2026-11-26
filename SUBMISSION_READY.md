@@ -9,6 +9,7 @@
 - **Target Network**: QoreChain Testnet `qorechain-diana` (EVM Chain ID `9800`)
 - **Public GitHub Repository**: https://github.com/alphonshhhomenicmtu/qoreguard-qorechain
 - **Live GitHub Pages Demo**: https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/
+- **8-Slide Judge Pitch Deck (PDF)**: https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/qoreguard-deck.pdf ([docs/qoreguard-deck.pdf](docs/qoreguard-deck.pdf))
 - **Featured Cover Image (`1200×630`)**: [docs/cover-image.png](docs/cover-image.png)
 - **1080p Demo Video (YouTube, 108s < 3 min)**: https://www.youtube.com/watch?v=La_8Dh7TA04
 - **1080p Demo Video Mirror (Google Drive)**: https://drive.google.com/file/d/1luPFpSazP9o20nE1wC738ppocV_4eZUo/view?usp=sharing

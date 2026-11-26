@@ -157,9 +157,9 @@ export default function App() {
         <div className="telemetry-items">
           <span className="badge badge-blue">{telemetry.chainId}</span>
           <span className="mono">EVM ID: {QORECHAIN_DIANA.evmChainId}</span>
-          <span className="mono">Height: #{telemetry.latestHeight}</span>
+          <span className="mono">Height: #{telemetry.latestHeight.toLocaleString("en-US")}</span>
+          <span className="badge badge-green">0x0A01 pqcVerify: true</span>
           <span className="mono muted">Source: {telemetry.source}</span>
-          <span className="mono muted">RPC: {QORECHAIN_DIANA.rpcUrl}</span>
         </div>
         <button onClick={() => void refreshTelemetry()}>
           Probe Live RPC (Opt-In)
@@ -175,7 +175,16 @@ export default function App() {
             Window &bull; ML-DSA-87 + secp256k1 Hybrid Signing
           </p>
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <a
+            href="qoreguard-deck.pdf"
+            target="_blank"
+            rel="noreferrer"
+            className="btn-primary"
+            style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", padding: "8px 14px", borderRadius: 8 }}
+          >
+            Pitch Deck (PDF)
+          </a>
           <button className="btn-primary" onClick={exportLatestReceipt}>
             Export SHA-256 Receipt
           </button>
