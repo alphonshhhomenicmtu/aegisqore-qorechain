@@ -18,7 +18,11 @@ Running `npm run probe:testnet` executes a real read-only probe against **QoreCh
 - **`IQorePQC.pqcVerify` (`0x...0A01`)**: `available: true`, **`verified: true`** (`on-chain ML-DSA-87 verify=true`)
 - **`IQorePQC.pqcKeyStatus` (`0x...0A02`)**: `available: true`
 - **`IQoreConsensus.rlConsensusParams` (`0x...0C01`)**: `available: true` (`blockTime=5000, baseGasPrice=100, validators=4, epoch=1`)
-- **Automated Test Suites**: **37 / 37 PASS** (`30/30` core Vitest including InMemory MCP client/server round-trip + `7/7` web Vitest)
+- **On-Chain Smart Contract (`contracts/QoreGuardPolicyRegistry.sol`)**:
+  - Integrates directly with QoreChain native precompiles `0x...0A01` (`pqcVerify`), `0x...0A02` (`pqcKeyStatus`), `0x...0B01` (`aiRiskScore`), and `0x...0B02` (`aiAnomalyCheck`), enforcing ML-DSA-87 pubkey hashes, per-tx caps, O(1) two-epoch sliding-window daily caps, target/selector allowlists (default-blocking `approve` and `setApprovalForAll`), strict monotonic nonces, emergency owner revocation, and tamper-evident `PolicyApproved` / `PolicyRejected` / `AgentRevoked` events.
+  - **Live QoreX EVM 9800 Dry-Run Gas Estimate (`npm run deploy:registry -- --dry-run`)**: **`2,318,479` gas** (`0.2608288875 QOR` @ `112.5 gwei`, block `10,801,813`, `10,515`-byte Solc `0.8.28` `paris` creation bytecode, SHA-256 `3a7d4021...0c0dc84b`).
+  - **Static Security Audit (`Slither 0.11.6`, 59 detectors)**: **`0 High / 0 Medium / 0 Optimization`** findings.
+- **Automated Test Suites**: **55 / 55 PASS** (`15/15` Foundry incl. 256-run fuzz + `33/33` core Vitest incl. InMemory MCP round-trip + `7/7` web Vitest)
 
 ---
 
@@ -35,20 +39,27 @@ Running `npm run probe:testnet` executes a real read-only probe against **QoreCh
 
 ```text
 qoreguard/
+├── contracts/
+│   ├── QoreGuardPolicyRegistry.sol        # On-chain QoreX EVM 9800 PQ Agent Policy Registry (0x...0A01/0A02/0B01/0B02)
+│   └── test/QoreGuardPolicyRegistry.t.sol # 15 Foundry tests (vm.etch precompile mocks + 256-run spend-cap fuzzing)
+├── foundry.toml                           # Solc 0.8.28 (paris, optimizer=200) + QoreChain RPC endpoints
 ├── src/
+│   ├── contracts/registry-artifact.ts     # Compiled QoreGuardPolicyRegistry ABI + verified creation bytecode
 │   ├── networks.ts              # Verified QoreChain testnet/mainnet/localnet presets, precompile ABIs (0x...0901-0C01), prefix-free domain strings
 │   ├── types.ts                 # Strict TypeScript contracts for policies, hybrid envelopes, decisions, and audit bundles
 │   ├── crypto.ts                # FIPS-204 ML-DSA-87/65/44 (@qorechain/pqc) + FIPS-205 SLH-DSA + secp256k1/ed25519 + hybridSignBytes('v2')
 │   ├── policy-engine.ts         # Stateful spending caps, sliding velocity windows, allowlist/selector firewall, anti-replay, 6-vector attack simulator, SHAKE-256 + ML-DSA-87 audit ledger
 │   ├── guard.ts                 # Secret-input refusal guard (blocks private keys / BIP-39 mnemonics in MCP tool calls)
 │   ├── testnet-client.ts        # Live QoreX read-only RPC/precompile probe + env-var-driven turnkey guarded tx runner (honest simulation fallback)
+│   ├── registry-deployer.ts     # Turnkey QoreGuardPolicyRegistry gas estimator & EVM deployer
 │   ├── mcp/
 │   │   ├── server.ts            # 6-tool qoreguard-mcp server aligned with @qorechain/mcp conventions
 │   │   └── bin.ts               # Stdio CLI entry point for MCP clients
 │   └── scripts/
+│       ├── deploy-registry.ts   # `npm run deploy:registry -- --dry-run` live EVM 9800 gas estimator & turnkey deployer
 │       ├── testnet-probe.ts     # `npm run probe:testnet` live QoreX read-only probe
 │       └── turnkey-tx.ts        # `npm run tx:turnkey` env-var-driven guarded tx / dry-run demo
-├── test/                        # 30 Vitest tests (crypto, policy-engine, MCP InMemory round-trip, testnet-client)
+├── test/                        # 33 Vitest tests (crypto, policy-engine, MCP InMemory round-trip, testnet-client, registry-deployer)
 ├── web/                         # Interactive React 19 + Vite 6 + TypeScript console deployed to GitHub Pages (7 Vitest tests)
 ├── docs/screenshots/            # Captured high-resolution UI screenshots
 ├── AI_USAGE.md                  # AI-assisted engineering disclosure (Best AI-Native Build)
@@ -74,13 +85,24 @@ Aligned with `@qorechain/mcp` (`structuredContent` + JSON content + secret-input
 
 ## Quickstart & Reproducibility
 
-### Core SDK, Policy Engine & MCP Server (`30 / 30` Vitest PASS)
+### Core SDK, Policy Engine & MCP Server (`33 / 33` Vitest PASS)
 
 ```bash
 npm install
 npm run typecheck
 npm run build
 npm test
+```
+
+### On-Chain Smart Contract (`15 / 15` Foundry PASS, Slither `0 High / 0 Medium`)
+
+```bash
+forge build
+forge test -vv
+# Live QoreX EVM 9800 deployment gas estimation (no private key required):
+npm run deploy:registry -- --dry-run
+# Turnkey live broadcast (env var QOREX_PRIVATE_KEY only; never commit keys):
+# QOREX_PRIVATE_KEY=0x... npm run deploy:registry -- --broadcast
 ```
 
 ### Live QoreX Testnet Probe & Turnkey Guarded Tx Runner

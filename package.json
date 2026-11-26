@@ -34,7 +34,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "probe:testnet": "node dist/scripts/testnet-probe.js",
-    "tx:turnkey": "node dist/scripts/turnkey-tx.js"
+    "tx:turnkey": "node dist/scripts/turnkey-tx.js",
+    "deploy:registry": "node dist/scripts/deploy-registry.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

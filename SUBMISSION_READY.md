@@ -22,8 +22,15 @@
   - Live `IQorePQC.pqcKeyStatus` (`0x...0A02`) and `IQoreConsensus.rlConsensusParams` (`0x...0C01`) confirmed reachable on testnet.
 - **Turnkey Guarded Transaction Runner (`npm run tx:turnkey`)**:
   - Environment-variable driven (`QOREGUARD_PRIVATE_KEY`, `QOREGUARD_DRY_RUN`, `QOREGUARD_TO`, `QOREGUARD_VALUE_UQOR`), zero hardcoded keys, enforcing the hybrid ML-DSA-87 policy engine prior to broadcast with honest `simulated-dry-run` fallback and ML-DSA-87 attested SHAKE-256 audit bundles.
-- **Automated Verification (`37 / 37` PASS)**:
-  - Core SDK + Policy Engine + MCP Server: `npm run typecheck`, `npm run build`, `npm test` → **30 / 30 Vitest PASS** across `crypto`, `policy-engine`, `mcp-server` (full `InMemoryTransport` client/server round-trip), and `testnet-client`.
+- **On-Chain QoreX EVM 9800 Smart Contract (`contracts/QoreGuardPolicyRegistry.sol`)**:
+  - Direct Solidity integration with QoreChain native precompiles `IQorePQCVerify` (`0x...0A01`), `IQorePQCKeyStatus` (`0x...0A02`), `IQoreAIRiskScore` (`0x...0B01`), and `IQoreAIAnomalyCheck` (`0x...0B02`).
+  - Per-agent ML-DSA-87 pubkey hash, single-tx spend cap, O(1) two-epoch sliding-window daily cap, target/selector allowlist & default forbidden `approve`/`setApprovalForAll` firewall, strict monotonic anti-replay nonce, emergency owner revocation, and `PolicyApproved` / `PolicyRejected` / `AgentRevoked` commitment events.
+  - **Foundry Suite (`contracts/test/QoreGuardPolicyRegistry.t.sol`)**: **`15 / 15` PASS** (using `vm.etch` precompile mocks + 256-run spend-cap fuzzing).
+  - **Slither Static Analysis (`0.11.6`, 59 detectors)**: **`0 High / 0 Medium / 0 Optimization`**.
+  - **Live QoreX EVM 9800 Dry-Run Deployment Gas Estimate (`npm run deploy:registry -- --dry-run`)**: **`2,318,479` gas** (`0.2608288875 QOR` at `112.5 gwei`, live block `10,801,813`, `10,515`-byte Solc `0.8.28` `paris` bytecode, SHA-256 `3a7d40217b1779f27c481b41a3ca6f11e2bebcfce9c961544ed42cfa0c0dc84b`).
+- **Automated Verification (`55 / 55` PASS)**:
+  - On-Chain Contract (Foundry): `forge test -vv` → **15 / 15 PASS** + Slither **0 High / 0 Medium**.
+  - Core SDK + Policy Engine + MCP Server + Registry Deployer: `npm run typecheck`, `npm run build`, `npm test` → **33 / 33 Vitest PASS**.
   - Interactive Web Console (`web/`): `npm run typecheck`, `npm test`, `npm run build` → **7 / 7 Vitest PASS**, deployed live to GitHub Pages.
 
 ---
@@ -60,4 +67,5 @@
 - [x] 1080p demo video ≤ 3 min uploaded to YouTube (`108s`) + public Google Drive mirror
 - [x] `README.md` with live QoreX Testnet evidence, screenshots, quickstart, and open-source credits
 - [x] `AI_USAGE.md` documenting AI-native workflow and human/automated verification
-- [x] Zero hardcoded secrets / private keys, zero non-English artifacts, 37/37 automated tests passing
+- [x] On-chain `QoreGuardPolicyRegistry.sol` verified (`15/15` Foundry PASS, Slither `0 High / 0 Medium`, live EVM 9800 dry-run `2,318,479` gas)
+- [x] Zero hardcoded secrets / private keys, zero non-English artifacts, 55/55 automated tests passing

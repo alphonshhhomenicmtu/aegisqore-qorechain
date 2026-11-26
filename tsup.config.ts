@@ -7,6 +7,7 @@ export default defineConfig({
     "mcp/bin": "src/mcp/bin.ts",
     "scripts/testnet-probe": "src/scripts/testnet-probe.ts",
     "scripts/turnkey-tx": "src/scripts/turnkey-tx.ts",
+    "scripts/deploy-registry": "src/scripts/deploy-registry.ts",
   },
   format: ["esm"],
   dts: true,

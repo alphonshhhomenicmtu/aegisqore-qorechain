@@ -8,6 +8,13 @@ export * from "./guard.js";
 export * from "./crypto.js";
 export * from "./policy-engine.js";
 export * from "./testnet-client.js";
+export * from "./registry-deployer.js";
+export {
+  QOREGUARD_REGISTRY_ABI,
+  QOREGUARD_REGISTRY_BYTECODE,
+  QOREGUARD_REGISTRY_BYTECODE_BYTES,
+  QOREGUARD_REGISTRY_BYTECODE_SHA256,
+} from "./contracts/registry-artifact.js";
 export {
   createDefaultPolicy,
   createQoreGuardMcpServer,
