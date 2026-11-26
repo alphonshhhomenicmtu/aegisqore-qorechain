@@ -1,0 +1,16 @@
+node_modules/
+web/node_modules/
+dist/
+web/dist/
+.env
+.env.local
+.env.*
+!.env.example
+*.log
+*.mp4
+*.tsbuildinfo
+*.key
+*.pem
+*keypair*.json
+coverage/
+.DS_Store

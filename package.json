@@ -1,0 +1,66 @@
+{
+  "name": "@qoreguard/core",
+  "version": "1.0.0",
+  "description": "QoreGuard: Post-Quantum AI Agent Policy Engine, Anti-Downgrade Guard, and MCP Server for QoreChain / QoreX (FIPS-204 ML-DSA-87 + FIPS-205 SLH-DSA + Hybrid EVM/Cosmos).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp/server.d.ts",
+      "import": "./dist/mcp/server.js"
+    }
+  },
+  "bin": {
+    "qoreguard-mcp": "./dist/mcp/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "probe:testnet": "node dist/scripts/testnet-probe.js",
+    "tx:turnkey": "node dist/scripts/turnkey-tx.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@noble/curves": "^1.9.0",
+    "@noble/hashes": "^2.0.0",
+    "@noble/post-quantum": "^0.7.1",
+    "@qorechain/pqc": "^0.2.3",
+    "viem": "^2.21.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.2.0"
+  },
+  "keywords": [
+    "qorechain",
+    "qorex",
+    "post-quantum",
+    "pqc",
+    "ml-dsa-87",
+    "slh-dsa",
+    "ai-agents",
+    "mcp",
+    "policy-engine",
+    "security"
+  ]
+}
