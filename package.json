@@ -1,7 +1,7 @@
 {
   "name": "@qoreguard/core",
   "version": "1.0.0",
-  "description": "QoreGuard: Post-Quantum AI Agent Policy Engine, Anti-Downgrade Guard, and MCP Server for QoreChain / QoreX (FIPS-204 ML-DSA-87 + FIPS-205 SLH-DSA + Hybrid EVM/Cosmos).",
+  "description": "AegisQore: Post-Quantum AI Agent Firewall, Scoped EVM Policy Registry, Anti-Downgrade Guard, and MCP Server for QoreChain / QoreX (FIPS-204 ML-DSA-87 + FIPS-205 SLH-DSA + Hybrid EVM/Cosmos).",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,

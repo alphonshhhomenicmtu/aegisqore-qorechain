@@ -124,7 +124,7 @@ export default function App() {
     const latest = traces[0];
     const payload = JSON.stringify(
       {
-        product: "QoreGuard",
+        product: "AegisQore",
         chainId: QORECHAIN_DIANA.chainId,
         evmChainId: QORECHAIN_DIANA.evmChainId,
         policy: {
@@ -144,7 +144,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `qoreguard-receipt-${latest.decision.receiptHash.slice(0, 10)}.json`;
+    a.download = `aegisqore-receipt-${latest.decision.receiptHash.slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
     setExportStatus(`Exported receipt ${latest.decision.receiptHash.slice(0, 16)}...`);
@@ -169,7 +169,7 @@ export default function App() {
       {/* Header */}
       <header className="header-card">
         <div>
-          <h1>QoreGuard — Post-Quantum AI Agent Treasury &amp; MCP Guard</h1>
+          <h1>AegisQore — Post-Quantum AI Agent Firewall &amp; Scoped EVM Policy Registry</h1>
           <p>
             QoreChain Developer Fest (Post-Quantum AI Agents) &bull; Scoped EVM
             Window &bull; ML-DSA-87 + secp256k1 Hybrid Signing
@@ -177,7 +177,7 @@ export default function App() {
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <a
-            href="qoreguard-deck.pdf"
+            href="aegisqore-deck.pdf"
             target="_blank"
             rel="noreferrer"
             className="btn-primary"

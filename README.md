@@ -1,14 +1,14 @@
-# QoreGuard — Post-Quantum AI Agent Policy Engine, MCP Server & Interactive Console for QoreChain / QoreX
+# AegisQore — Post-Quantum AI Agent Firewall, Scoped EVM Policy Registry & MCP Server for QoreChain / QoreX
 
-![QoreGuard Featured Cover](docs/cover-image.png)
+![AegisQore Featured Cover](docs/cover-image.png)
 
-**QoreGuard** is a unified, Apache-2.0 post-quantum security stack for autonomous AI agents operating on **QoreChain / QoreX** (`qorechain-diana`, EVM Chain ID `9800`). It pairs real NIST post-quantum cryptography (`@qorechain/pqc` FIPS-204 **ML-DSA-87 / ML-DSA-65**, FIPS-205 **SLH-DSA**, FIPS-202 **SHAKE-256**), on-chain **Scoped EVM Windows** & **30-day owner-to-agent link leases**, official **`qorechain-msg-v1|<chainId>|<data>`** hybrid `secp256k1 + ML-DSA-87` authenticated messaging, a 6-tool **Model Context Protocol** server (`qoreguard-mcp`), live QoreX Testnet precompile verification, and an interactive web console (`web/`).
+**AegisQore** is a unified, Apache-2.0 post-quantum security stack for autonomous AI agents operating on **QoreChain / QoreX** (`qorechain-diana`, EVM Chain ID `9800`). It pairs real NIST post-quantum cryptography (`@qorechain/pqc` FIPS-204 **ML-DSA-87 / ML-DSA-65**, FIPS-205 **SLH-DSA**, FIPS-202 **SHAKE-256**), on-chain **Scoped EVM Windows** & **30-day owner-to-agent link leases**, official **`qorechain-msg-v1|<chainId>|<data>`** hybrid `secp256k1 + ML-DSA-87` authenticated messaging, a 6-tool **Model Context Protocol** server (`qoreguard-mcp`), live QoreX Testnet precompile verification, and an interactive web console (`web/`).
 
-- **Live GitHub Pages Demo**: [https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/](https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/)
-- **8-Slide Judge Pitch Deck (PDF)**: [https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/qoreguard-deck.pdf](https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/qoreguard-deck.pdf) ([docs/qoreguard-deck.pdf](docs/qoreguard-deck.pdf))
+- **Live GitHub Pages Demo**: [https://alphonshhhomenicmtu.github.io/aegisqore-qorechain/](https://alphonshhhomenicmtu.github.io/aegisqore-qorechain/)
+- **8-Slide Judge Pitch Deck (PDF)**: [https://alphonshhhomenicmtu.github.io/aegisqore-qorechain/aegisqore-deck.pdf](https://alphonshhhomenicmtu.github.io/aegisqore-qorechain/aegisqore-deck.pdf) ([docs/aegisqore-deck.pdf](docs/aegisqore-deck.pdf))
 - **1080p Demo Video (YouTube, 108s)**: [https://www.youtube.com/watch?v=La_8Dh7TA04](https://www.youtube.com/watch?v=La_8Dh7TA04)
 - **1080p Demo Video Mirror (Google Drive)**: [https://drive.google.com/file/d/1luPFpSazP9o20nE1wC738ppocV_4eZUo/view?usp=sharing](https://drive.google.com/file/d/1luPFpSazP9o20nE1wC738ppocV_4eZUo/view?usp=sharing)
-- **Public Repository**: [https://github.com/alphonshhhomenicmtu/qoreguard-qorechain](https://github.com/alphonshhhomenicmtu/qoreguard-qorechain)
+- **Public Repository**: [https://github.com/alphonshhhomenicmtu/aegisqore-qorechain](https://github.com/alphonshhhomenicmtu/aegisqore-qorechain)
 - **AI Transparency**: See [AI_USAGE.md](AI_USAGE.md) (Best AI-Native Build submission) and [SUBMISSION_READY.md](SUBMISSION_READY.md).
 
 ---
@@ -42,7 +42,7 @@ Running `npm run probe:testnet` executes a real read-only probe against **QoreCh
 ## Monorepo Architecture
 
 ```text
-qoreguard/
+aegisqore-qorechain/
 ├── contracts/
 │   ├── QoreGuardPolicyRegistry.sol        # On-chain QoreX EVM 9800 PQ Agent Policy Registry (0x...0A01/0A02/0B01/0B02)
 │   └── test/QoreGuardPolicyRegistry.t.sol # 18 Foundry tests (vm.etch precompiles, 30d TTL, Scoped EVM Window, qorechain-msg-v1, fuzz)
@@ -57,7 +57,7 @@ qoreguard/
 │   ├── testnet-client.ts        # Live QoreX read-only RPC/precompile probe + env-var-driven turnkey guarded tx runner (honest simulation fallback)
 │   ├── registry-deployer.ts     # Turnkey QoreGuardPolicyRegistry gas estimator & EVM deployer
 │   ├── mcp/
-│   │   ├── server.ts            # 6-tool qoreguard-mcp server aligned with @qorechain/mcp conventions
+│   │   ├── server.ts            # 6-tool AegisQore MCP server (`qoreguard-mcp`) aligned with @qorechain/mcp conventions
 │   │   └── bin.ts               # Stdio CLI entry point for MCP clients
 │   └── scripts/
 │       ├── deploy-registry.ts   # `npm run deploy:registry -- --dry-run` live EVM 9800 gas estimator & turnkey deployer
@@ -66,8 +66,8 @@ qoreguard/
 ├── test/                        # 36 Vitest tests (crypto + qorechain-msg-v1, policy-engine + 30d TTL + Scoped Window, MCP, testnet, deployer)
 ├── web/                         # Interactive React 19 + Vite 6 + TypeScript console deployed to GitHub Pages (8 Vitest tests)
 ├── docs/
-│   ├── cover-image.png          # 1200x630 Featured Cover Image for QoreChain submission
-│   ├── qoreguard-deck.pdf       # 8-slide 16:9 Judge Pitch Deck PDF
+│   ├── cover-image.png          # 1200x630 Featured Cover Image for AegisQore QoreChain submission
+│   ├── aegisqore-deck.pdf       # 8-slide 16:9 Judge Pitch Deck PDF
 │   └── screenshots/             # Captured high-resolution UI screenshots
 ├── AI_USAGE.md                  # AI-assisted engineering disclosure (Best AI-Native Build)
 └── SUBMISSION_READY.md          # Complete QoreChain Developer Fest submission checklist & evidence
@@ -142,7 +142,7 @@ npm run build
 
 ## Credits & Open-Source Libraries
 
-QoreGuard builds directly on the official QoreChain developer ecosystem and audited open-source cryptography libraries:
+AegisQore builds directly on the official QoreChain developer ecosystem and audited open-source cryptography libraries:
 - [`@qorechain/pqc`](https://github.com/qorechain/qorechain-pqc), [`qorechain-sdk`](https://github.com/qorechain/qorechain-sdk), and [`qorechain-mcp`](https://github.com/qorechain/qorechain-mcp) (QoreChain Association)
 - `@noble/post-quantum`, `@noble/curves`, `@noble/hashes` (Paul Miller)
 - `@modelcontextprotocol/sdk`, `viem`, `zod`, `React`, `Vite`, `Vitest`, `tsup`

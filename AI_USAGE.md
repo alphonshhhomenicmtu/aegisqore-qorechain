@@ -1,10 +1,10 @@
-# AI Usage Disclosure — QoreGuard (Best AI-Native Build)
+# AI Usage Disclosure — AegisQore (Best AI-Native Build)
 
-This document transparently discloses how AI tools and agents were used to design, build, test, and verify **QoreGuard** for the QoreChain Developer Fest.
+This document transparently discloses how AI tools and agents were used to design, build, test, and verify **AegisQore** for the QoreChain Developer Fest.
 
 ## 1. AI-Native Architecture & Product Purpose
 
-QoreGuard itself is an **AI-native security primitive**: its Model Context Protocol server (`qoreguard-mcp`) lets LLM coding and treasury agents inspect policies, quote spending/velocity impact, verify hybrid `ML-DSA-87 + secp256k1/ed25519` envelopes, run adversarial quantum-downgrade simulations, probe live QoreChain precompiles, and export ML-DSA-87 attested SHAKE-256 audit bundles—while refusing any private key or seed phrase accidentally passed into tool inputs.
+AegisQore itself is an **AI-native security primitive**: its Model Context Protocol server (`qoreguard-mcp`) lets LLM coding and treasury agents inspect policies, quote spending/velocity impact, verify hybrid `ML-DSA-87 + secp256k1/ed25519` envelopes, run adversarial quantum-downgrade simulations, probe live QoreChain precompiles, and export ML-DSA-87 attested SHAKE-256 audit bundles—while refusing any private key or seed phrase accidentally passed into tool inputs.
 
 ## 2. How AI Was Used During Development
 

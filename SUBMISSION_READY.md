@@ -1,15 +1,15 @@
-# QoreGuard — QoreChain Developer Fest Submission Ready Package
+# AegisQore — QoreChain Developer Fest Submission Ready Package
 
 ## 1. Project Metadata & Live Links
 
-- **Project Name**: QoreGuard — Post-Quantum AI Agent Policy Engine, MCP Server & Interactive Console
+- **Project Name**: AegisQore — Post-Quantum AI Agent Firewall & Scoped EVM Policy Registry
 - **Primary Track**: **Post-Quantum AI Agents** ($1,500 1st / $750 2nd)
 - **Special Award Opt-In**: **Best AI-Native Build** ($500 — see [AI_USAGE.md](AI_USAGE.md)) + **Top-Quality Floor** (7 × $250, ≥70/100)
 - **License**: Apache-2.0 ([LICENSE](LICENSE))
 - **Target Network**: QoreChain Testnet `qorechain-diana` (EVM Chain ID `9800`)
-- **Public GitHub Repository**: https://github.com/alphonshhhomenicmtu/qoreguard-qorechain
-- **Live GitHub Pages Demo**: https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/
-- **8-Slide Judge Pitch Deck (PDF)**: https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/qoreguard-deck.pdf ([docs/qoreguard-deck.pdf](docs/qoreguard-deck.pdf))
+- **Public GitHub Repository**: https://github.com/alphonshhhomenicmtu/aegisqore-qorechain
+- **Live GitHub Pages Demo**: https://alphonshhhomenicmtu.github.io/aegisqore-qorechain/
+- **8-Slide Judge Pitch Deck (PDF)**: https://alphonshhhomenicmtu.github.io/aegisqore-qorechain/aegisqore-deck.pdf ([docs/aegisqore-deck.pdf](docs/aegisqore-deck.pdf))
 - **Featured Cover Image (`1200×630`)**: [docs/cover-image.png](docs/cover-image.png)
 - **1080p Demo Video (YouTube, 108s < 3 min)**: https://www.youtube.com/watch?v=La_8Dh7TA04
 - **1080p Demo Video Mirror (Google Drive)**: https://drive.google.com/file/d/1luPFpSazP9o20nE1wC738ppocV_4eZUo/view?usp=sharing
@@ -42,7 +42,7 @@
 
 ## 3. 1:1 Mapping to Post-Quantum AI Agents Track Requirements
 
-| Official Track Requirement | QoreGuard Implementation (On-Chain Solidity + Core SDK + MCP + Web Console) |
+| Official Track Requirement | AegisQore Implementation (On-Chain Solidity + Core SDK + MCP + Web Console) |
 |---|---|
 | **Scoped EVM Window (`startBlock`, `endBlock`, `maxTxCount`, `maxTotalValue`, `allowedTargets`)** | Enforced both on-chain (`openScopedEvmWindow`, `closeScopedEvmWindow` in `QoreGuardPolicyRegistry.sol`) and in `QoreGuardPolicyEngine.openScopedEvmWindow()`, reverting cleanly on out-of-window blocks (`SCOPED_BLOCK_OUT_OF_RANGE`), tx count breaches (`SCOPED_TX_COUNT_EXCEEDED`), value breaches (`SCOPED_TOTAL_VALUE_EXCEEDED`), or non-window targets. |
 | **Transaction, Value, Duration & Target Limits** | `maxSingleTxAmount` / `maxSingleTxUqor`, O(1) two-epoch sliding daily cap + rolling `velocityWindows` (`maxSpendUqor`, `maxTxCount`), strict `allowedTargets` / `denylistedTargets`, and 4-byte EVM calldata selector firewall blocking `approve` (`0x095ea7b3`) and `setApprovalForAll` (`0xa22cb465`). |
@@ -67,7 +67,7 @@
 
 ## 5. Submission Readiness Checklist
 
-- [x] Unified public GitHub repository under Apache-2.0 (`alphonshhhomenicmtu/qoreguard-qorechain`)
+- [x] Unified public GitHub repository under Apache-2.0 (`alphonshhhomenicmtu/aegisqore-qorechain`)
 - [x] Live GitHub Pages deployment verified (`HTTP 200` + live JS/CSS asset check)
 - [x] 1080p demo video ≤ 3 min uploaded to YouTube (`108s`) + public Google Drive mirror
 - [x] `README.md` with live QoreX Testnet evidence, `1200×630` featured cover image (`docs/cover-image.png`), screenshots, quickstart, and open-source credits
