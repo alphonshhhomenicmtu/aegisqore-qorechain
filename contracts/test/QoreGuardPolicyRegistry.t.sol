@@ -6,6 +6,9 @@ import {QoreGuardPolicyRegistry} from "../QoreGuardPolicyRegistry.sol";
 /// @notice Minimal Foundry cheatcode interface (zero external git submodule deps).
 interface Vm {
     function warp(uint256 newTimestamp) external;
+    function roll(uint256 newHeight) external;
+    function addr(uint256 privateKey) external pure returns (address keyAddr);
+    function sign(uint256 privateKey, bytes32 digest) external pure returns (uint8 v, bytes32 r, bytes32 s);
     function prank(address msgSender) external;
     function startPrank(address msgSender) external;
     function stopPrank() external;
@@ -544,5 +547,295 @@ contract QoreGuardPolicyRegistryTest {
             assert(registry.getPolicy(AGENT).lastNonce == 1);
             assert(registry.currentSlidingWindowSpend(AGENT) == amount);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // 10. 30-Day Max Owner-to-Agent Link TTL & Renewal / Re-Link Enforcement
+    // -------------------------------------------------------------------------
+    function test_MaxLinkTtl30DaysEnforcementAndRenewAgentLinkRestoresExecution() public {
+        address[] memory targets = new address[](1);
+        targets[0] = TARGET_ALLOWED;
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = SEL_TRANSFER;
+
+        // 1. Registering with validUntil > 30 days reverts with LinkTtlExceeded
+        vm.prank(OWNER);
+        vm.expectRevert(QoreGuardPolicyRegistry.LinkTtlExceeded.selector);
+        registry.registerAgentPolicy(
+            QoreGuardPolicyRegistry.RegistrationInput({
+                agent: AGENT,
+                pqPubkeyHash: validPubkeyHash,
+                maxSingleTxAmount: 5_000_000,
+                dailyCapAmount: 10_000_000,
+                windowDuration: 1 days,
+                validUntil: uint64(block.timestamp + 30 days + 1),
+                maxAiRiskLevel: 2,
+                requireOnchainKeyStatus: true,
+                requireAiPrecompile: true,
+                enforceTargetAllowlist: true,
+                enforceSelectorAllowlist: true
+            }),
+            targets,
+            selectors
+        );
+
+        // 2. Non-owner cannot renew link; owner cannot renew > 30 days
+        vm.prank(ATTACKER);
+        vm.expectRevert(QoreGuardPolicyRegistry.NotPolicyOwner.selector);
+        registry.renewAgentLink(AGENT, uint64(block.timestamp + 14 days));
+
+        vm.prank(OWNER);
+        vm.expectRevert(QoreGuardPolicyRegistry.LinkTtlExceeded.selector);
+        registry.renewAgentLink(AGENT, uint64(block.timestamp + 30 days + 1));
+
+        // 3. Renew link to full 30-day ceiling, then warp past 30 days -> reverts with REASON_AGENT_LINK_EXPIRED
+        vm.prank(OWNER);
+        registry.renewAgentLink(AGENT, uint64(block.timestamp + 30 days));
+        assert(registry.getPolicy(AGENT).linkExpiresAt == uint64(block.timestamp + 30 days));
+
+        vm.warp(block.timestamp + 30 days + 1);
+        QoreGuardPolicyRegistry.ActionAuthRequest memory expiredLinkReq = _validRequest(1, 500_000, "");
+        bytes32 expCommit = registry.computeCommitment(
+            expiredLinkReq.agent,
+            expiredLinkReq.target,
+            expiredLinkReq.amount,
+            expiredLinkReq.calldataPayload,
+            expiredLinkReq.nonce,
+            expiredLinkReq.expiresAt
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                QoreGuardPolicyRegistry.PolicyRejectedError.selector,
+                registry.REASON_AGENT_LINK_EXPIRED(),
+                expCommit
+            )
+        );
+        registry.authorizeAction(expiredLinkReq);
+
+        // 4. Owner renews link within 30-day cap -> execution immediately restored!
+        vm.prank(OWNER);
+        registry.renewAgentLink(AGENT, uint64(block.timestamp + 15 days));
+
+        QoreGuardPolicyRegistry.ActionAuthRequest memory restoredReq = _validRequest(1, 500_000, "");
+        registry.authorizeAction(restoredReq);
+        assert(registry.getPolicy(AGENT).lastNonce == 1);
+
+        // 5. Key rotation via relinkAgentKey updates ML-DSA-87 pubkey hash & restores revoked agent
+        bytes memory rotatedPubkey = _filledBytes(2592, 0x55);
+        bytes32 rotatedHash = keccak256(rotatedPubkey);
+        MockQorePQCKeyStatus(registry.PQC_KEY_STATUS_PRECOMPILE()).setKeyStatus(
+            AGENT,
+            true,
+            3,
+            rotatedPubkey,
+            true
+        );
+        vm.prank(OWNER);
+        registry.revokeAgent(AGENT, keccak256("scheduled-rotation"));
+        assert(registry.getPolicy(AGENT).revoked == true);
+
+        vm.prank(OWNER);
+        registry.relinkAgentKey(AGENT, rotatedHash, uint64(block.timestamp + 30 days));
+        assert(registry.getPolicy(AGENT).revoked == false);
+        assert(registry.getPolicy(AGENT).pqPubkeyHash == rotatedHash);
+
+        QoreGuardPolicyRegistry.ActionAuthRequest memory req2 = _validRequest(2, 250_000, "");
+        req2.pqPubkey = rotatedPubkey;
+        registry.authorizeAction(req2);
+        assert(registry.getPolicy(AGENT).lastNonce == 2);
+    }
+
+    // -------------------------------------------------------------------------
+    // 11. Scoped EVM Window Bounds (startBlock, endBlock, maxTxCount, maxTotalValue, allowedTargets)
+    // -------------------------------------------------------------------------
+    function test_ScopedEvmWindowEnforcesBlockBoundsTxCountValueCapAndTargets() public {
+        vm.roll(1000);
+        address scopedTargetOnly = TARGET_ALLOWED;
+        address globalExtraTarget = address(0x3333333333333333333333333333333333333333);
+
+        vm.prank(OWNER);
+        registry.setTargetAllowed(AGENT, globalExtraTarget, true);
+
+        address[] memory winTargets = new address[](1);
+        winTargets[0] = scopedTargetOnly;
+
+        vm.prank(OWNER);
+        registry.openScopedEvmWindow(AGENT, 1010, 1020, 2, 3_000_000, winTargets);
+
+        // 1. Before startBlock (1005 < 1010) -> REASON_SCOPED_BLOCK_OUT_OF_RANGE
+        vm.roll(1005);
+        QoreGuardPolicyRegistry.ActionAuthRequest memory earlyReq = _validRequest(1, 500_000, "");
+        bytes32 cEarly = registry.computeCommitment(
+            earlyReq.agent, earlyReq.target, earlyReq.amount, earlyReq.calldataPayload, earlyReq.nonce, earlyReq.expiresAt
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                QoreGuardPolicyRegistry.PolicyRejectedError.selector,
+                registry.REASON_SCOPED_BLOCK_OUT_OF_RANGE(),
+                cEarly
+            )
+        );
+        registry.authorizeAction(earlyReq);
+
+        // 2. Inside window [1010, 1020]: target outside windowTargets reverts even if globally allowed
+        vm.roll(1012);
+        QoreGuardPolicyRegistry.ActionAuthRequest memory outTargetReq = _validRequest(1, 500_000, "");
+        outTargetReq.target = globalExtraTarget;
+        bytes32 cTarget = registry.computeCommitment(
+            outTargetReq.agent, outTargetReq.target, outTargetReq.amount, outTargetReq.calldataPayload, outTargetReq.nonce, outTargetReq.expiresAt
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                QoreGuardPolicyRegistry.PolicyRejectedError.selector,
+                registry.REASON_TARGET_NOT_ALLOWED(),
+                cTarget
+            )
+        );
+        registry.authorizeAction(outTargetReq);
+
+        // 3. Tx 1 (2M) succeeds; Tx 2 of 1.5M exceeds maxTotalValue (3M) -> REASON_SCOPED_VALUE_CAP_EXCEEDED
+        registry.authorizeAction(_validRequest(1, 2_000_000, ""));
+        assert(registry.getScopedEvmWindow(AGENT).usedTxCount == 1);
+        assert(registry.getScopedEvmWindow(AGENT).usedTotalValue == 2_000_000);
+
+        QoreGuardPolicyRegistry.ActionAuthRequest memory overWinVal = _validRequest(2, 1_500_000, "");
+        bytes32 cVal = registry.computeCommitment(
+            overWinVal.agent, overWinVal.target, overWinVal.amount, overWinVal.calldataPayload, overWinVal.nonce, overWinVal.expiresAt
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                QoreGuardPolicyRegistry.PolicyRejectedError.selector,
+                registry.REASON_SCOPED_VALUE_CAP_EXCEEDED(),
+                cVal
+            )
+        );
+        registry.authorizeAction(overWinVal);
+
+        // 4. Tx 2 of 1M fits exact maxTotalValue (3M) & maxTxCount (2) -> succeeds
+        registry.authorizeAction(_validRequest(2, 1_000_000, ""));
+        assert(registry.getScopedEvmWindow(AGENT).usedTxCount == 2);
+
+        // 5. Tx 3 of 0 value exceeds maxTxCount (2) -> REASON_SCOPED_TX_COUNT_EXCEEDED
+        QoreGuardPolicyRegistry.ActionAuthRequest memory overTxCnt = _validRequest(3, 0, "");
+        bytes32 cCnt = registry.computeCommitment(
+            overTxCnt.agent, overTxCnt.target, overTxCnt.amount, overTxCnt.calldataPayload, overTxCnt.nonce, overTxCnt.expiresAt
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                QoreGuardPolicyRegistry.PolicyRejectedError.selector,
+                registry.REASON_SCOPED_TX_COUNT_EXCEEDED(),
+                cCnt
+            )
+        );
+        registry.authorizeAction(overTxCnt);
+
+        // 6. After endBlock (1021 > 1020) -> REASON_SCOPED_BLOCK_OUT_OF_RANGE
+        vm.roll(1021);
+        QoreGuardPolicyRegistry.ActionAuthRequest memory lateReq = _validRequest(3, 0, "");
+        bytes32 cLate = registry.computeCommitment(
+            lateReq.agent, lateReq.target, lateReq.amount, lateReq.calldataPayload, lateReq.nonce, lateReq.expiresAt
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                QoreGuardPolicyRegistry.PolicyRejectedError.selector,
+                registry.REASON_SCOPED_BLOCK_OUT_OF_RANGE(),
+                cLate
+            )
+        );
+        registry.authorizeAction(lateReq);
+    }
+
+    // -------------------------------------------------------------------------
+    // 12. Official Authenticated Messaging (`qorechain-msg-v1|<chainId>|<data>`)
+    // -------------------------------------------------------------------------
+    function test_VerifyOfficialQorechainMsgV1HybridSecp256k1AndMlDsa87() public {
+        uint256 agentPrivKey = 0xA6E4701;
+        address signerAgent = vm.addr(agentPrivKey);
+        bytes memory dataPayload = bytes("treasury-rebalance:pool-9800:250000uqor");
+
+        bytes memory formatted = registry.formatAuthenticatedMessage("qorechain-diana", dataPayload);
+        assert(
+            keccak256(formatted) ==
+                keccak256(bytes("qorechain-msg-v1|qorechain-diana|treasury-rebalance:pool-9800:250000uqor"))
+        );
+
+        // Delimiter injection in chainId must revert cleanly
+        vm.expectRevert(QoreGuardPolicyRegistry.InvalidAuthMessageFormat.selector);
+        registry.formatAuthenticatedMessage("qorechain-diana|injected", dataPayload);
+
+        // Enforce exact formatted message bytes inside precompile mock
+        MockQorePQCVerify(registry.PQC_VERIFY_PRECOMPILE()).setExpectedMessage(keccak256(formatted), true);
+
+        bytes32 digest = keccak256(formatted);
+        bytes memory secpSig;
+        {
+            (uint8 v, bytes32 r, bytes32 s) = vm.sign(agentPrivKey, digest);
+            secpSig = abi.encodePacked(r, s, v);
+        }
+
+        QoreGuardPolicyRegistry.AuthMessageInput memory msgIn = QoreGuardPolicyRegistry.AuthMessageInput({
+            chainId: "qorechain-diana",
+            data: dataPayload,
+            secpSignature: secpSig,
+            pqPubkey: validPubkey,
+            pqSignature: validSig
+        });
+
+        {
+            (bool valid, bytes32 msgHash) = registry.verifyAuthenticatedMessage(msgIn, signerAgent, validPubkeyHash);
+            assert(valid);
+            assert(msgHash == digest);
+
+            // Wrong signer must fail
+            (bool badSigner,) = registry.verifyAuthenticatedMessage(msgIn, ATTACKER, validPubkeyHash);
+            assert(!badSigner);
+
+            // Tampered data must fail
+            msgIn.data = bytes("treasury-rebalance:pool-9800:999999uqor");
+            (bool badData,) = registry.verifyAuthenticatedMessage(msgIn, signerAgent, validPubkeyHash);
+            assert(!badData);
+            msgIn.data = dataPayload;
+
+            // Stripped ML-DSA-87 signature must fail
+            msgIn.pqSignature = "";
+            (bool strippedPq,) = registry.verifyAuthenticatedMessage(msgIn, signerAgent, validPubkeyHash);
+            assert(!strippedPq);
+            msgIn.pqSignature = validSig;
+        }
+
+        // Register signerAgent and verify policy-bound verifyAgentAuthenticatedMessage + expiry revocation
+        {
+            address[] memory targets = new address[](1);
+            targets[0] = TARGET_ALLOWED;
+            bytes4[] memory selectors = new bytes4[](1);
+            selectors[0] = SEL_TRANSFER;
+
+            vm.prank(OWNER);
+            registry.registerAgentPolicy(
+                QoreGuardPolicyRegistry.RegistrationInput({
+                    agent: signerAgent,
+                    pqPubkeyHash: validPubkeyHash,
+                    maxSingleTxAmount: 5_000_000,
+                    dailyCapAmount: 10_000_000,
+                    windowDuration: 1 days,
+                    validUntil: uint64(block.timestamp + 30 days),
+                    maxAiRiskLevel: 2,
+                    requireOnchainKeyStatus: false,
+                    requireAiPrecompile: false,
+                    enforceTargetAllowlist: true,
+                    enforceSelectorAllowlist: true
+                }),
+                targets,
+                selectors
+            );
+        }
+
+        (bool agentValid,) = registry.verifyAgentAuthenticatedMessage(signerAgent, msgIn);
+        assert(agentValid);
+
+        // Past 30-day link TTL -> verifyAgentAuthenticatedMessage returns false
+        vm.warp(block.timestamp + 30 days + 1);
+        (bool expiredValid,) = registry.verifyAgentAuthenticatedMessage(signerAgent, msgIn);
+        assert(!expiredValid);
     }
 }

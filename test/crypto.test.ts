@@ -5,13 +5,16 @@ import { describe, expect, it } from "vitest";
 import {
   computeIntentCommitment,
   computePolicyHash,
+  formatQorechainAuthMessage,
   fromHex,
   generateHybridAgentIdentity,
   pqcKeygen,
   pqcSignBytes,
   pqcVerifyBytes,
+  signAuthenticatedMessage,
   signHybridIntent,
   toPublicIdentity,
+  verifyAuthenticatedMessage,
   verifyHybridEnvelope,
 } from "../src/crypto.js";
 import { createDefaultPolicy } from "../src/mcp/server.js";
@@ -185,5 +188,71 @@ describe("QoreGuard Hybrid Post-Quantum Cryptography", () => {
     const msg = computeIntentCommitment(makeIntent(computePolicyHash(policy), registered.evmAddress)).commitmentBytes;
     const sig = pqcSignBytes("ml-dsa-87", rawKp.secretKey, msg);
     expect(pqcVerifyBytes("ml-dsa-87", rawKp.publicKey, msg, sig)).toBe(true);
+  });
+
+  it("signs and verifies official qorechain-msg-v1|<chainId>|<data> hybrid secp256k1 + ML-DSA-87 messages", () => {
+    const id = generateHybridAgentIdentity("agent-treasury-01", {
+      pqAlgorithm: "ml-dsa-87",
+      classicalAlgorithm: "secp256k1",
+    });
+
+    const formatted = formatQorechainAuthMessage("qorechain-diana", "execute:vault-rebalance:250000uqor");
+    expect(new TextDecoder().decode(formatted)).toBe(
+      "qorechain-msg-v1|qorechain-diana|execute:vault-rebalance:250000uqor",
+    );
+    expect(() => formatQorechainAuthMessage("qorechain-diana|inject", "x")).toThrow();
+
+    const signed = signAuthenticatedMessage(id, {
+      chainId: "qorechain-diana",
+      data: "execute:vault-rebalance:250000uqor",
+    });
+    expect(signed.format).toBe("qorechain-msg-v1");
+    expect(signed.formattedMessageUtf8).toBe(
+      "qorechain-msg-v1|qorechain-diana|execute:vault-rebalance:250000uqor",
+    );
+    expect(fromHex(signed.secp256k1.signatureHex).length).toBe(65);
+    expect(fromHex(signed.mldsa87.publicKeyHex).length).toBe(2592);
+    expect(fromHex(signed.mldsa87.signatureHex).length).toBe(4627);
+
+    const verified = verifyAuthenticatedMessage(signed, {
+      chainId: "qorechain-diana",
+      expectedEvmSigner: id.evmAddress,
+      expectedPqPubkeyHashHex: id.pqPubkeyHashHex,
+    });
+    expect(verified.valid).toBe(true);
+    expect(verified.formatValid).toBe(true);
+    expect(verified.secp256k1Valid).toBe(true);
+    expect(verified.mldsa87Valid).toBe(true);
+    expect(verified.pubkeyHashMatches).toBe(true);
+    expect(verified.recoveredEvmAddress).toBe(id.evmAddress);
+
+    // Rejects tampered payload, classical-only downgrade, wrong chainId, or flipped secp256k1 signature
+    const tamperedData = verifyAuthenticatedMessage({
+      ...signed,
+      dataHex: bytesToHex(new TextEncoder().encode("execute:vault-rebalance:999999uqor")),
+    });
+    expect(tamperedData.valid).toBe(false);
+    expect(tamperedData.codes).toContain("COMMITMENT_TAMPERED");
+
+    const strippedPqc = verifyAuthenticatedMessage({
+      ...signed,
+      mldsa87: { ...signed.mldsa87, signatureHex: "" },
+    });
+    expect(strippedPqc.valid).toBe(false);
+    expect(strippedPqc.codes).toContain("QUANTUM_DOWNGRADE_CLASSICAL_ONLY");
+
+    const wrongChain = verifyAuthenticatedMessage(signed, { chainId: "qorechain-vladi" });
+    expect(wrongChain.valid).toBe(false);
+    expect(wrongChain.codes).toContain("CHAIN_ID_MISMATCH");
+
+    const badSecpBytes = fromHex(signed.secp256k1.signatureHex);
+    badSecpBytes[0] = (badSecpBytes[0] ?? 0) ^ 0x01;
+    const badSecp = verifyAuthenticatedMessage({
+      ...signed,
+      secp256k1: { ...signed.secp256k1, signatureHex: bytesToHex(badSecpBytes) },
+    });
+    expect(badSecp.valid).toBe(false);
+    expect(badSecp.secp256k1Valid).toBe(false);
+    expect(badSecp.codes).toContain("CLASSICAL_SIGNATURE_INVALID");
   });
 });

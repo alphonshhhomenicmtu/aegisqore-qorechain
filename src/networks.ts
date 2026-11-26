@@ -176,4 +176,8 @@ export const QOREGUARD_DOMAINS = {
   policyCommit: "qoreguard-policy-commit-v1|",
   auditBundle: "qoreguard-audit-bundle-v1|",
   qoreHybridV2: "qorechain-pqc-hybrid-v2",
+  authenticatedMessagePrefix: "qorechain-msg-v1|",
 } as const;
+
+/** Official 30-day maximum owner-to-agent link TTL in seconds (30 * 86,400 = 2,592,000s). */
+export const MAX_AGENT_LINK_TTL_SEC = 30 * 24 * 60 * 60;

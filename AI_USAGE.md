@@ -19,6 +19,6 @@ QoreGuard itself is an **AI-native security primitive**: its Model Context Proto
 Every AI-generated component was independently verified with deterministic tooling before publication:
 - **TypeScript strict checks**: `npm run typecheck` passed with `0` errors in both root and `web/`.
 - **Production builds**: `npm run build` (`tsup` ESM + `.d.ts` at root; `tsc -b && vite build` in `web/`) succeeded cleanly.
-- **Automated tests**: `30/30` core Vitest tests + `7/7` web Vitest tests = **`37/37` PASS** (no mocked cryptography; real `@qorechain/pqc` and `@noble/post-quantum` sign/verify).
+- **Automated tests**: `18/18` Foundry tests (incl. 256-run fuzzing, 30-day `MAX_LINK_TTL` renewal, Scoped EVM Window bounds, and `qorechain-msg-v1` hybrid verification) + `36/36` core Vitest tests + `7/7` web Vitest tests = **`61/61` PASS** (no mocked cryptography in TypeScript; real `@qorechain/pqc` and `@noble/post-quantum` sign/verify, plus Slither `0 High / 0 Medium`).
 - **Live QoreX Testnet verification**: `npm run probe:testnet` verified a freshly signed ML-DSA-87 signature against live on-chain `IQorePQC.pqcVerify` (`0x...0A01`) on `qorechain-diana` (EVM `9800`), returning `verified: true`.
 - **Security hygiene**: Verified zero hardcoded keys, zero `.env` or `.mp4` leaks, and secret-refusal unit tests on MCP inputs.

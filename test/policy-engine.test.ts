@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { generateHybridAgentIdentity, signHybridIntent } from "../src/crypto.js";
 import { createDefaultPolicy } from "../src/mcp/server.js";
+import { MAX_AGENT_LINK_TTL_SEC } from "../src/networks.js";
 import {
   createSignedAgentEnvelope,
   QoreGuardPolicyEngine,
@@ -278,5 +279,107 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
     const badAtt = verifyAuditBundle(tamperedAtt);
     expect(badAtt.valid).toBe(false);
     expect(badAtt.attestationValid).toBe(false);
+  });
+
+  it("enforces 30-day max owner-to-agent link TTL, rejects expired/revoked links, and restores execution on renewAgentLink()", () => {
+    const owner = "0x9999999999999999999999999999999999999999";
+    const t0 = 1_760_000_000;
+
+    // Exceeding 30 days on policy construction throws RangeError
+    expect(() =>
+      setupEngine({
+        agentLink: {
+          ownerAddress: owner,
+          linkedAtUnix: t0,
+          expiresAtUnix: t0 + MAX_AGENT_LINK_TTL_SEC + 1,
+        },
+      }),
+    ).toThrow(RangeError);
+
+    const { id, engine } = setupEngine({
+      agentLink: {
+        ownerAddress: owner,
+        linkedAtUnix: t0,
+        expiresAtUnix: t0 + MAX_AGENT_LINK_TTL_SEC,
+      },
+    });
+
+    // Cannot renew > 30 days or from wrong owner
+    expect(() => engine.renewAgentLink(owner, t0 + MAX_AGENT_LINK_TTL_SEC + 10, t0)).toThrow(RangeError);
+    expect(() => engine.renewAgentLink("0x1234", t0 + 86_400, t0)).toThrow();
+
+    // Past 30-day TTL -> AGENT_LINK_EXPIRED
+    const expiredAt = t0 + MAX_AGENT_LINK_TTL_SEC + 1;
+    const env1 = createSignedAgentEnvelope(engine, id, {
+      to: TARGET_ALLOWED,
+      valueUqor: "200000",
+      nonce: 1,
+      expiresAtUnix: expiredAt + 600,
+    });
+    const denied = engine.verifyAndCommit(env1, { nowUnix: expiredAt });
+    expect(denied.verdict).toBe("DENY");
+    expect(denied.rejectionCodes).toContain("AGENT_LINK_EXPIRED");
+    expect(engine.getLastNonce()).toBe(0);
+
+    // Owner renews within 30 days -> execution immediately succeeds!
+    engine.renewAgentLink(owner, expiredAt + 14 * 86_400, expiredAt);
+    const restored = engine.verifyAndCommit(env1, { nowUnix: expiredAt + 1 });
+    expect(restored.verdict).toBe("ALLOW");
+    expect(engine.getLastNonce()).toBe(1);
+
+    // Revoking blocks execution until owner re-links via renewAgentLink
+    engine.revokeAgentLink(owner);
+    const env2 = createSignedAgentEnvelope(engine, id, {
+      to: TARGET_ALLOWED,
+      valueUqor: "100000",
+      nonce: 2,
+      expiresAtUnix: expiredAt + 600,
+    });
+    expect(engine.quoteDecision(env2, { nowUnix: expiredAt + 2 }).rejectionCodes).toContain("AGENT_REVOKED");
+    engine.renewAgentLink(owner, expiredAt + 30 * 86_400, expiredAt + 2);
+    expect(engine.verifyAndCommit(env2, { nowUnix: expiredAt + 3 }).verdict).toBe("ALLOW");
+  });
+
+  it("enforces Scoped EVM Window bounds (startBlock, endBlock, maxTxCount, maxTotalValue, allowedTargets)", () => {
+    const { id, engine } = setupEngine();
+    const now = 1_760_000_000;
+    engine.openScopedEvmWindow({
+      startBlock: 100,
+      endBlock: 110,
+      maxTxCount: 2,
+      maxTotalValueUqor: "1500000",
+      allowedTargets: [TARGET_ALLOWED],
+    });
+
+    const e1 = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "1000000", nonce: 1, expiresAtUnix: now + 600 });
+    // Out-of-window block (99 < 100)
+    expect(engine.quoteDecision(e1, { nowUnix: now, blockNumber: 99 }).rejectionCodes).toContain(
+      "SCOPED_EVM_BLOCK_OUT_OF_RANGE",
+    );
+
+    // Target outside window's allowedTargets (even though TARGET_SECOND is globally allowlisted)
+    const eTarget = createSignedAgentEnvelope(engine, id, { to: TARGET_SECOND, valueUqor: "100000", nonce: 1, expiresAtUnix: now + 600 });
+    expect(engine.quoteDecision(eTarget, { nowUnix: now, blockNumber: 105 }).rejectionCodes).toContain(
+      "TARGET_NOT_ALLOWLISTED",
+    );
+
+    // Tx 1 (1M uqor) at block 105 -> ALLOW
+    expect(engine.verifyAndCommit(e1, { nowUnix: now, blockNumber: 105 }).verdict).toBe("ALLOW");
+
+    // Tx 2 of 600k uqor -> 1.6M > 1.5M -> SCOPED_EVM_VALUE_EXCEEDED
+    const eOverVal = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "600000", nonce: 2, expiresAtUnix: now + 600 });
+    expect(engine.quoteDecision(eOverVal, { nowUnix: now, blockNumber: 106 }).rejectionCodes).toContain(
+      "SCOPED_EVM_VALUE_EXCEEDED",
+    );
+
+    // Tx 2 of 500k uqor -> 1.5M <= 1.5M, count=2 <= 2 -> ALLOW
+    const e2 = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "500000", nonce: 2, expiresAtUnix: now + 600 });
+    expect(engine.verifyAndCommit(e2, { nowUnix: now, blockNumber: 106 }).verdict).toBe("ALLOW");
+
+    // Tx 3 of 0 uqor -> count=3 > 2 -> SCOPED_EVM_TX_COUNT_EXCEEDED
+    const e3 = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "0", nonce: 3, expiresAtUnix: now + 600 });
+    expect(engine.quoteDecision(e3, { nowUnix: now, blockNumber: 107 }).rejectionCodes).toContain(
+      "SCOPED_EVM_TX_COUNT_EXCEEDED",
+    );
   });
 });

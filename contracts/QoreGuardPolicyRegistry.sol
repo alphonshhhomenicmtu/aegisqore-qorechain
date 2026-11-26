@@ -38,8 +38,10 @@ interface IQoreAIAnomalyCheck {
 /// @title QoreGuardPolicyRegistry
 /// @notice On-chain Post-Quantum AI Agent Policy Registry & Enforcement Gate for QoreChain / QoreX (EVM 9800).
 /// @dev Enforces ML-DSA-87 (FIPS-204) post-quantum signatures via QoreChain precompiles 0x...0A01 and 0x...0A02,
-///      on-chain AI risk/anomaly bounds via 0x...0B01 and 0x...0B02, per-tx & O(1) sliding-window daily spend caps,
-///      target & 4-byte calldata selector firewalls, strict monotonic anti-replay nonces, and emergency owner revocation.
+///      30-day maximum owner-to-agent link TTL with renewal/re-linking, Scoped EVM Windows (startBlock, endBlock,
+///      maxTxCount, maxTotalValue, allowedTargets), authenticated messaging (`qorechain-msg-v1|<chainId>|<data>`
+///      hybrid secp256k1 + ML-DSA-87), on-chain AI risk/anomaly bounds via 0x...0B01 and 0x...0B02, per-tx & O(1)
+///      sliding-window daily spend caps, 4-byte calldata selector firewalls, strict monotonic nonces, and revocation.
 contract QoreGuardPolicyRegistry {
     // -------------------------------------------------------------------------
     // Fixed QoreChain EVM Precompile Addresses
@@ -50,11 +52,21 @@ contract QoreGuardPolicyRegistry {
     address public constant AI_ANOMALY_CHECK_PRECOMPILE = address(0x0B02);
 
     // -------------------------------------------------------------------------
-    // Post-Quantum & Security Constants
+    // Post-Quantum, Link TTL & Authenticated Messaging Constants
     // -------------------------------------------------------------------------
     uint8 public constant ML_DSA_87_ALGORITHM_ID = 3;
     uint256 public constant ML_DSA_87_PUBKEY_BYTES = 2592;
     uint256 public constant ML_DSA_87_SIGNATURE_BYTES = 4627;
+
+    /// @notice Maximum owner-to-agent link lease duration (owner must renew/re-link at least every 30 days).
+    uint64 public constant MAX_LINK_TTL = 30 days;
+
+    /// @notice Official QoreChain authenticated message domain prefix (`qorechain-msg-v1|<chainId>|<data>`).
+    string public constant AUTH_MSG_PREFIX = "qorechain-msg-v1|";
+
+    /// @dev Half-order of secp256k1 curve (EIP-2 signature malleability ceiling).
+    uint256 private constant SECP256K1N_HALF =
+        0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0;
 
     bytes4 public constant SELECTOR_ERC20_APPROVE = 0x095ea7b3;
     bytes4 public constant SELECTOR_SET_APPROVAL_FOR_ALL = 0xa22cb465;
@@ -64,8 +76,12 @@ contract QoreGuardPolicyRegistry {
 
     // Structured machine-readable rejection reason codes (for PolicyRejected events)
     bytes32 public constant REASON_AGENT_INACTIVE_OR_REVOKED = keccak256("AGENT_INACTIVE_OR_REVOKED");
+    bytes32 public constant REASON_AGENT_LINK_EXPIRED = keccak256("AGENT_LINK_TTL_EXPIRED");
     bytes32 public constant REASON_WINDOW_EXPIRED = keccak256("EVM_WINDOW_EXPIRED");
     bytes32 public constant REASON_INTENT_EXPIRED = keccak256("INTENT_EXPIRED");
+    bytes32 public constant REASON_SCOPED_BLOCK_OUT_OF_RANGE = keccak256("SCOPED_BLOCK_OUT_OF_RANGE");
+    bytes32 public constant REASON_SCOPED_TX_COUNT_EXCEEDED = keccak256("SCOPED_TX_COUNT_EXCEEDED");
+    bytes32 public constant REASON_SCOPED_VALUE_CAP_EXCEEDED = keccak256("SCOPED_TOTAL_VALUE_EXCEEDED");
     bytes32 public constant REASON_NONCE_REPLAY_OR_GAP = keccak256("NONCE_REPLAY_OR_OUT_OF_ORDER");
     bytes32 public constant REASON_QUANTUM_DOWNGRADE = keccak256("QUANTUM_DOWNGRADE_DETECTED");
     bytes32 public constant REASON_PUBKEY_HASH_MISMATCH = keccak256("PUBKEY_HASH_MISMATCH");
@@ -84,6 +100,9 @@ contract QoreGuardPolicyRegistry {
     // -------------------------------------------------------------------------
     error ZeroAddress();
     error InvalidPolicyParams();
+    error LinkTtlExceeded();
+    error InvalidScopedWindow();
+    error InvalidAuthMessageFormat();
     error NotPolicyOwner();
     error PolicyRejectedError(bytes32 reasonCode, bytes32 commitmentHash);
 
@@ -97,6 +116,7 @@ contract QoreGuardPolicyRegistry {
         uint256 dailyCapAmount;
         uint64 windowDuration;
         uint64 validUntil;
+        uint64 linkExpiresAt;
         uint64 lastNonce;
         uint8 maxAiRiskLevel;
         bool requireOnchainKeyStatus;
@@ -105,6 +125,18 @@ contract QoreGuardPolicyRegistry {
         bool enforceSelectorAllowlist;
         bool active;
         bool revoked;
+    }
+
+    struct ScopedEvmWindow {
+        bool enabled;
+        bool hasWindowTargets;
+        uint64 windowId;
+        uint64 startBlock;
+        uint64 endBlock;
+        uint64 maxTxCount;
+        uint64 usedTxCount;
+        uint256 maxTotalValue;
+        uint256 usedTotalValue;
     }
 
     struct SlidingWindowLedger {
@@ -139,8 +171,18 @@ contract QoreGuardPolicyRegistry {
         bytes pqSignature;
     }
 
+    struct AuthMessageInput {
+        string chainId;
+        bytes data;
+        bytes secpSignature;
+        bytes pqPubkey;
+        bytes pqSignature;
+    }
+
     mapping(address => AgentPolicy) private _policies;
     mapping(address => SlidingWindowLedger) private _ledgers;
+    mapping(address => ScopedEvmWindow) private _scopedWindows;
+    mapping(address => mapping(uint64 => mapping(address => bool))) private _windowAllowedTargets;
     mapping(address => mapping(address => bool)) public allowedTargets;
     mapping(address => mapping(bytes4 => bool)) public allowedSelectors;
     mapping(address => mapping(bytes4 => bool)) public forbiddenSelectors;
@@ -154,7 +196,38 @@ contract QoreGuardPolicyRegistry {
         bytes32 indexed pqPubkeyHash,
         uint256 maxSingleTxAmount,
         uint256 dailyCapAmount,
-        uint64 validUntil
+        uint64 validUntil,
+        uint64 linkExpiresAt
+    );
+
+    event AgentLinkRenewed(
+        address indexed agent,
+        address indexed owner,
+        uint64 newExpiresAt
+    );
+
+    event AgentKeyRelinked(
+        address indexed agent,
+        address indexed owner,
+        bytes32 indexed newPqPubkeyHash,
+        uint64 newExpiresAt
+    );
+
+    event ScopedEvmWindowOpened(
+        address indexed agent,
+        address indexed owner,
+        uint64 indexed windowId,
+        uint64 startBlock,
+        uint64 endBlock,
+        uint64 maxTxCount,
+        uint256 maxTotalValue,
+        uint256 targetCount
+    );
+
+    event ScopedEvmWindowClosed(
+        address indexed agent,
+        address indexed owner,
+        uint64 indexed windowId
     );
 
     event TargetAllowlistUpdated(address indexed agent, address indexed target, bool allowed);
@@ -197,11 +270,12 @@ contract QoreGuardPolicyRegistry {
     }
 
     // -------------------------------------------------------------------------
-    // Policy Management
+    // Policy, 30-Day Link Lease & Scoped EVM Window Management
     // -------------------------------------------------------------------------
 
     /// @notice Registers or updates a scoped post-quantum policy for `input.agent`.
-    /// @dev Pre-seeds dangerous ERC-20 / ERC-721 approval selectors in `forbiddenSelectors`.
+    /// @dev Enforces `input.validUntil <= block.timestamp + MAX_LINK_TTL` (30 days max owner-agent link)
+    ///      and pre-seeds dangerous ERC-20 / ERC-721 approval selectors in `forbiddenSelectors`.
     function registerAgentPolicy(
         RegistrationInput calldata input,
         address[] calldata initialTargets,
@@ -217,6 +291,10 @@ contract QoreGuardPolicyRegistry {
         ) {
             revert InvalidPolicyParams();
         }
+        uint64 maxLinkExpiry = uint64(block.timestamp) + MAX_LINK_TTL;
+        if (input.validUntil > maxLinkExpiry) {
+            revert LinkTtlExceeded();
+        }
 
         AgentPolicy storage existing = _policies[input.agent];
         if (existing.owner != address(0) && existing.owner != msg.sender) {
@@ -229,6 +307,7 @@ contract QoreGuardPolicyRegistry {
         existing.dailyCapAmount = input.dailyCapAmount;
         existing.windowDuration = input.windowDuration;
         existing.validUntil = input.validUntil;
+        existing.linkExpiresAt = maxLinkExpiry;
         existing.maxAiRiskLevel = input.maxAiRiskLevel;
         existing.requireOnchainKeyStatus = input.requireOnchainKeyStatus;
         existing.requireAiPrecompile = input.requireAiPrecompile;
@@ -238,23 +317,7 @@ contract QoreGuardPolicyRegistry {
         existing.revoked = false;
 
         // Default selector firewall: forbid unbounded token approvals
-        forbiddenSelectors[input.agent][SELECTOR_ERC20_APPROVE] = true;
-        forbiddenSelectors[input.agent][SELECTOR_SET_APPROVAL_FOR_ALL] = true;
-
-        uint256 tLen = initialTargets.length;
-        for (uint256 i = 0; i < tLen; ++i) {
-            address tgt = initialTargets[i];
-            if (tgt == address(0)) revert ZeroAddress();
-            allowedTargets[input.agent][tgt] = true;
-            emit TargetAllowlistUpdated(input.agent, tgt, true);
-        }
-
-        uint256 sLen = initialSelectors.length;
-        for (uint256 i = 0; i < sLen; ++i) {
-            bytes4 sel = initialSelectors[i];
-            allowedSelectors[input.agent][sel] = true;
-            emit SelectorPolicyUpdated(input.agent, sel, true, forbiddenSelectors[input.agent][sel]);
-        }
+        _seedInitialAllowlists(input.agent, initialTargets, initialSelectors);
 
         emit AgentPolicyRegistered(
             input.agent,
@@ -262,8 +325,122 @@ contract QoreGuardPolicyRegistry {
             input.pqPubkeyHash,
             input.maxSingleTxAmount,
             input.dailyCapAmount,
-            input.validUntil
+            input.validUntil,
+            maxLinkExpiry
         );
+    }
+
+    function _seedInitialAllowlists(
+        address agent,
+        address[] calldata initialTargets,
+        bytes4[] calldata initialSelectors
+    ) internal {
+        forbiddenSelectors[agent][SELECTOR_ERC20_APPROVE] = true;
+        forbiddenSelectors[agent][SELECTOR_SET_APPROVAL_FOR_ALL] = true;
+
+        uint256 tLen = initialTargets.length;
+        for (uint256 i = 0; i < tLen; ++i) {
+            address tgt = initialTargets[i];
+            if (tgt == address(0)) revert ZeroAddress();
+            allowedTargets[agent][tgt] = true;
+            emit TargetAllowlistUpdated(agent, tgt, true);
+        }
+
+        uint256 sLen = initialSelectors.length;
+        for (uint256 i = 0; i < sLen; ++i) {
+            bytes4 sel = initialSelectors[i];
+            allowedSelectors[agent][sel] = true;
+            emit SelectorPolicyUpdated(agent, sel, true, forbiddenSelectors[agent][sel]);
+        }
+    }
+
+    /// @notice Renews or re-links an owner-to-agent lease for up to `MAX_LINK_TTL` (30 days) from `block.timestamp`.
+    function renewAgentLink(address agent, uint64 newExpiresAt) external onlyPolicyOwner(agent) {
+        if (newExpiresAt <= block.timestamp || newExpiresAt > uint64(block.timestamp) + MAX_LINK_TTL) {
+            revert LinkTtlExceeded();
+        }
+        AgentPolicy storage policy = _policies[agent];
+        policy.linkExpiresAt = newExpiresAt;
+        policy.validUntil = newExpiresAt;
+        policy.active = true;
+        policy.revoked = false;
+        emit AgentLinkRenewed(agent, msg.sender, newExpiresAt);
+    }
+
+    /// @notice Rotates the agent's registered ML-DSA-87 public-key hash and re-links for up to `MAX_LINK_TTL`.
+    function relinkAgentKey(
+        address agent,
+        bytes32 newPqPubkeyHash,
+        uint64 newExpiresAt
+    ) external onlyPolicyOwner(agent) {
+        if (newPqPubkeyHash == bytes32(0)) revert InvalidPolicyParams();
+        if (newExpiresAt <= block.timestamp || newExpiresAt > uint64(block.timestamp) + MAX_LINK_TTL) {
+            revert LinkTtlExceeded();
+        }
+        AgentPolicy storage policy = _policies[agent];
+        policy.pqPubkeyHash = newPqPubkeyHash;
+        policy.linkExpiresAt = newExpiresAt;
+        policy.validUntil = newExpiresAt;
+        policy.active = true;
+        policy.revoked = false;
+        emit AgentKeyRelinked(agent, msg.sender, newPqPubkeyHash, newExpiresAt);
+    }
+
+    /// @notice Opens a Scoped EVM Window bounding block height `[startBlock, endBlock]`, total tx count,
+    ///         cumulative value, and optional window-specific target allowlist.
+    function openScopedEvmWindow(
+        address agent,
+        uint64 startBlock,
+        uint64 endBlock,
+        uint64 maxTxCount,
+        uint256 maxTotalValue,
+        address[] calldata windowTargets
+    ) external onlyPolicyOwner(agent) {
+        if (
+            endBlock < startBlock ||
+            endBlock < uint64(block.number) ||
+            maxTxCount == 0 ||
+            maxTotalValue == 0
+        ) {
+            revert InvalidScopedWindow();
+        }
+        ScopedEvmWindow storage win = _scopedWindows[agent];
+        uint64 wid = win.windowId + 1;
+        uint256 wLen = windowTargets.length;
+
+        for (uint256 i = 0; i < wLen; ++i) {
+            address tgt = windowTargets[i];
+            if (tgt == address(0)) revert ZeroAddress();
+            _windowAllowedTargets[agent][wid][tgt] = true;
+        }
+
+        win.enabled = true;
+        win.hasWindowTargets = wLen > 0;
+        win.windowId = wid;
+        win.startBlock = startBlock;
+        win.endBlock = endBlock;
+        win.maxTxCount = maxTxCount;
+        win.usedTxCount = 0;
+        win.maxTotalValue = maxTotalValue;
+        win.usedTotalValue = 0;
+
+        emit ScopedEvmWindowOpened(
+            agent,
+            msg.sender,
+            wid,
+            startBlock,
+            endBlock,
+            maxTxCount,
+            maxTotalValue,
+            wLen
+        );
+    }
+
+    /// @notice Closes the active Scoped EVM Window for `agent`.
+    function closeScopedEvmWindow(address agent) external onlyPolicyOwner(agent) {
+        ScopedEvmWindow storage win = _scopedWindows[agent];
+        win.enabled = false;
+        emit ScopedEvmWindowClosed(agent, msg.sender, win.windowId);
     }
 
     function setTargetAllowed(address agent, address target, bool allowed) external onlyPolicyOwner(agent) {
@@ -292,11 +469,94 @@ contract QoreGuardPolicyRegistry {
     }
 
     // -------------------------------------------------------------------------
+    // Official Authenticated Messaging (`qorechain-msg-v1|<chainId>|<data>`)
+    // -------------------------------------------------------------------------
+
+    /// @notice Formats the canonical QoreChain authenticated message payload `qorechain-msg-v1|<chainId>|<data>`.
+    /// @dev Rejects empty `chainId` or `'|'` delimiter injection inside `chainId` to ensure unambiguous framing.
+    function formatAuthenticatedMessage(
+        string calldata chainId,
+        bytes calldata data
+    ) public pure returns (bytes memory) {
+        bytes calldata cid = bytes(chainId);
+        uint256 cLen = cid.length;
+        if (cLen == 0) revert InvalidAuthMessageFormat();
+        for (uint256 i = 0; i < cLen; ++i) {
+            if (cid[i] == 0x7c) revert InvalidAuthMessageFormat();
+        }
+        return abi.encodePacked(AUTH_MSG_PREFIX, chainId, "|", data);
+    }
+
+    /// @notice Verifies a hybrid `secp256k1` + `ML-DSA-87` signature over `qorechain-msg-v1|<chainId>|<data>`.
+    function verifyAuthenticatedMessage(
+        AuthMessageInput calldata msgInput,
+        address expectedSecpSigner,
+        bytes32 expectedPqPubkeyHash
+    ) public view returns (bool valid, bytes32 messageHash) {
+        bytes memory formatted = formatAuthenticatedMessage(msgInput.chainId, msgInput.data);
+        messageHash = keccak256(formatted);
+
+        if (expectedSecpSigner == address(0)) {
+            return (false, messageHash);
+        }
+        address recovered = _recoverSecp256k1(messageHash, msgInput.secpSignature);
+        if (recovered == address(0) || recovered != expectedSecpSigner) {
+            return (false, messageHash);
+        }
+
+        if (
+            msgInput.pqPubkey.length != ML_DSA_87_PUBKEY_BYTES ||
+            msgInput.pqSignature.length != ML_DSA_87_SIGNATURE_BYTES
+        ) {
+            return (false, messageHash);
+        }
+        if (expectedPqPubkeyHash != bytes32(0) && keccak256(msgInput.pqPubkey) != expectedPqPubkeyHash) {
+            return (false, messageHash);
+        }
+
+        bool pqOk = IQorePQCVerify(PQC_VERIFY_PRECOMPILE).pqcVerify(
+            msgInput.pqPubkey,
+            msgInput.pqSignature,
+            formatted
+        );
+        return (pqOk, messageHash);
+    }
+
+    /// @notice Verifies an authenticated message signed by a registered, non-expired QoreGuard agent.
+    function verifyAgentAuthenticatedMessage(
+        address agent,
+        AuthMessageInput calldata msgInput
+    ) external view returns (bool valid, bytes32 messageHash) {
+        AgentPolicy storage policy = _policies[agent];
+        if (
+            !policy.active ||
+            policy.revoked ||
+            block.timestamp > policy.linkExpiresAt ||
+            block.timestamp > policy.validUntil
+        ) {
+            bytes memory formatted = formatAuthenticatedMessage(msgInput.chainId, msgInput.data);
+            return (false, keccak256(formatted));
+        }
+        return verifyAuthenticatedMessage(msgInput, agent, policy.pqPubkeyHash);
+    }
+
+    // -------------------------------------------------------------------------
     // Read Helpers & Commitment Computation
     // -------------------------------------------------------------------------
 
     function getPolicy(address agent) external view returns (AgentPolicy memory) {
         return _policies[agent];
+    }
+
+    function getScopedEvmWindow(address agent) external view returns (ScopedEvmWindow memory) {
+        return _scopedWindows[agent];
+    }
+
+    function isScopedWindowTargetAllowed(address agent, address target) external view returns (bool) {
+        ScopedEvmWindow storage win = _scopedWindows[agent];
+        if (!win.enabled) return allowedTargets[agent][target];
+        if (!win.hasWindowTargets) return ! _policies[agent].enforceTargetAllowlist || allowedTargets[agent][target];
+        return _windowAllowedTargets[agent][win.windowId][target];
     }
 
     function computeCommitment(
@@ -353,7 +613,7 @@ contract QoreGuardPolicyRegistry {
     // Authorization & Audit Gate
     // -------------------------------------------------------------------------
 
-    /// @notice Strict execution gate: verifies ML-DSA-87 + AI risk + policy + nonce,
+    /// @notice Strict execution gate: verifies ML-DSA-87 + 30-day link TTL + Scoped EVM Window + AI risk + policy + nonce,
     ///         commits state on pass, and REVERTS with `PolicyRejectedError` on any violation.
     function authorizeAction(
         ActionAuthRequest calldata req
@@ -424,6 +684,26 @@ contract QoreGuardPolicyRegistry {
         }
     }
 
+    function _recoverSecp256k1(bytes32 digest, bytes calldata sig) internal pure returns (address) {
+        if (sig.length != 65) return address(0);
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(sig.offset)
+            s := calldataload(add(sig.offset, 32))
+            v := byte(0, calldataload(add(sig.offset, 64)))
+        }
+        if (v < 27) {
+            v += 27;
+        }
+        if (v != 27 && v != 28) return address(0);
+        if (uint256(r) == 0 || uint256(s) == 0 || uint256(s) > SECP256K1N_HALF) {
+            return address(0);
+        }
+        return ecrecover(digest, v, r, s);
+    }
+
     function _checkRequest(
         ActionAuthRequest calldata req,
         bytes4 selector,
@@ -433,12 +713,33 @@ contract QoreGuardPolicyRegistry {
         if (!policy.active || policy.revoked) {
             return REASON_AGENT_INACTIVE_OR_REVOKED;
         }
+        if (block.timestamp > policy.linkExpiresAt) {
+            return REASON_AGENT_LINK_EXPIRED;
+        }
         if (block.timestamp > policy.validUntil) {
             return REASON_WINDOW_EXPIRED;
         }
         if (block.timestamp > req.expiresAt) {
             return REASON_INTENT_EXPIRED;
         }
+
+        // Scoped EVM Window bounds (startBlock, endBlock, maxTxCount, maxTotalValue, windowTargets)
+        ScopedEvmWindow storage win = _scopedWindows[req.agent];
+        if (win.enabled) {
+            if (block.number < win.startBlock || block.number > win.endBlock) {
+                return REASON_SCOPED_BLOCK_OUT_OF_RANGE;
+            }
+            if (win.usedTxCount + 1 > win.maxTxCount) {
+                return REASON_SCOPED_TX_COUNT_EXCEEDED;
+            }
+            if (win.usedTotalValue + req.amount > win.maxTotalValue) {
+                return REASON_SCOPED_VALUE_CAP_EXCEEDED;
+            }
+            if (win.hasWindowTargets && !_windowAllowedTargets[req.agent][win.windowId][req.target]) {
+                return REASON_TARGET_NOT_ALLOWED;
+            }
+        }
+
         if (req.nonce != policy.lastNonce + 1) {
             return REASON_NONCE_REPLAY_OR_GAP;
         }
@@ -525,6 +826,12 @@ contract QoreGuardPolicyRegistry {
     ) internal returns (bytes32 decisionDigest) {
         AgentPolicy storage policy = _policies[req.agent];
         SlidingWindowLedger storage ledger = _ledgers[req.agent];
+        ScopedEvmWindow storage win = _scopedWindows[req.agent];
+
+        if (win.enabled) {
+            win.usedTxCount += 1;
+            win.usedTotalValue += req.amount;
+        }
 
         uint64 duration = policy.windowDuration;
         uint64 curEpoch = uint64(block.timestamp / uint256(duration));

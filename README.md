@@ -1,6 +1,8 @@
 # QoreGuard — Post-Quantum AI Agent Policy Engine, MCP Server & Interactive Console for QoreChain / QoreX
 
-**QoreGuard** is a unified, Apache-2.0 post-quantum security stack for autonomous AI agents operating on **QoreChain / QoreX** (`qorechain-diana`, EVM Chain ID `9800`). It pairs real NIST post-quantum cryptography (`@qorechain/pqc` FIPS-204 **ML-DSA-87 / ML-DSA-65**, FIPS-205 **SLH-DSA**, FIPS-202 **SHAKE-256**), a stateful policy & anti-quantum-downgrade engine, a 6-tool **Model Context Protocol** server (`qoreguard-mcp`), live QoreX Testnet precompile verification, and an interactive web console (`web/`).
+![QoreGuard Featured Cover](docs/cover-image.png)
+
+**QoreGuard** is a unified, Apache-2.0 post-quantum security stack for autonomous AI agents operating on **QoreChain / QoreX** (`qorechain-diana`, EVM Chain ID `9800`). It pairs real NIST post-quantum cryptography (`@qorechain/pqc` FIPS-204 **ML-DSA-87 / ML-DSA-65**, FIPS-205 **SLH-DSA**, FIPS-202 **SHAKE-256**), on-chain **Scoped EVM Windows** & **30-day owner-to-agent link leases**, official **`qorechain-msg-v1|<chainId>|<data>`** hybrid `secp256k1 + ML-DSA-87` authenticated messaging, a 6-tool **Model Context Protocol** server (`qoreguard-mcp`), live QoreX Testnet precompile verification, and an interactive web console (`web/`).
 
 - **Live GitHub Pages Demo**: [https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/](https://alphonshhhomenicmtu.github.io/qoreguard-qorechain/)
 - **1080p Demo Video (YouTube, 108s)**: [https://www.youtube.com/watch?v=La_8Dh7TA04](https://www.youtube.com/watch?v=La_8Dh7TA04)
@@ -19,10 +21,11 @@ Running `npm run probe:testnet` executes a real read-only probe against **QoreCh
 - **`IQorePQC.pqcKeyStatus` (`0x...0A02`)**: `available: true`
 - **`IQoreConsensus.rlConsensusParams` (`0x...0C01`)**: `available: true` (`blockTime=5000, baseGasPrice=100, validators=4, epoch=1`)
 - **On-Chain Smart Contract (`contracts/QoreGuardPolicyRegistry.sol`)**:
-  - Integrates directly with QoreChain native precompiles `0x...0A01` (`pqcVerify`), `0x...0A02` (`pqcKeyStatus`), `0x...0B01` (`aiRiskScore`), and `0x...0B02` (`aiAnomalyCheck`), enforcing ML-DSA-87 pubkey hashes, per-tx caps, O(1) two-epoch sliding-window daily caps, target/selector allowlists (default-blocking `approve` and `setApprovalForAll`), strict monotonic nonces, emergency owner revocation, and tamper-evident `PolicyApproved` / `PolicyRejected` / `AgentRevoked` events.
-  - **Live QoreX EVM 9800 Dry-Run Gas Estimate (`npm run deploy:registry -- --dry-run`)**: **`2,318,479` gas** (`0.2608288875 QOR` @ `112.5 gwei`, block `10,801,813`, `10,515`-byte Solc `0.8.28` `paris` creation bytecode, SHA-256 `3a7d4021...0c0dc84b`).
-  - **Static Security Audit (`Slither 0.11.6`, 59 detectors)**: **`0 High / 0 Medium / 0 Optimization`** findings.
-- **Automated Test Suites**: **55 / 55 PASS** (`15/15` Foundry incl. 256-run fuzz + `33/33` core Vitest incl. InMemory MCP round-trip + `7/7` web Vitest)
+  - Integrates directly with QoreChain native precompiles `0x...0A01` (`pqcVerify`), `0x...0A02` (`pqcKeyStatus`), `0x...0B01` (`aiRiskScore`), and `0x...0B02` (`aiAnomalyCheck`).
+  - Enforces **30-day maximum owner-to-agent link TTL** (`MAX_LINK_TTL = 30 days`, `renewAgentLink()`, `relinkAgentKey()`), **Scoped EVM Windows** (`openScopedEvmWindow(agent, startBlock, endBlock, maxTxCount, maxTotalValue, windowTargets)`), official **`qorechain-msg-v1|<chainId>|<data>`** hybrid `secp256k1 + ML-DSA-87` message verification (`verifyAuthenticatedMessage` & `verifyAgentAuthenticatedMessage`), per-tx & O(1) two-epoch sliding-window daily caps, target/selector allowlists (default-blocking `approve` and `setApprovalForAll`), strict monotonic nonces, emergency owner revocation, and tamper-evident `PolicyApproved` / `PolicyRejected` / `AgentRevoked` events.
+  - **Live QoreX EVM 9800 Dry-Run Gas Estimate (`npm run deploy:registry -- --dry-run`)**: **`3,480,337` gas** (`0.3915379125 QOR` @ `112.5 gwei`, block `10,802,524`, `15,896`-byte Solc `0.8.28` `paris` creation bytecode, SHA-256 `7c304cb1...87c2cdce`).
+  - **Static Security Audit (`Slither 0.11.6`, 102 detectors)**: **`0 High / 0 Medium / 0 Optimization`** findings.
+- **Automated Test Suites**: **61 / 61 PASS** (`18/18` Foundry incl. 256-run fuzz + `36/36` core Vitest incl. InMemory MCP round-trip + `7/7` web Vitest)
 
 ---
 
@@ -41,14 +44,14 @@ Running `npm run probe:testnet` executes a real read-only probe against **QoreCh
 qoreguard/
 ├── contracts/
 │   ├── QoreGuardPolicyRegistry.sol        # On-chain QoreX EVM 9800 PQ Agent Policy Registry (0x...0A01/0A02/0B01/0B02)
-│   └── test/QoreGuardPolicyRegistry.t.sol # 15 Foundry tests (vm.etch precompile mocks + 256-run spend-cap fuzzing)
+│   └── test/QoreGuardPolicyRegistry.t.sol # 18 Foundry tests (vm.etch precompiles, 30d TTL, Scoped EVM Window, qorechain-msg-v1, fuzz)
 ├── foundry.toml                           # Solc 0.8.28 (paris, optimizer=200) + QoreChain RPC endpoints
 ├── src/
 │   ├── contracts/registry-artifact.ts     # Compiled QoreGuardPolicyRegistry ABI + verified creation bytecode
-│   ├── networks.ts              # Verified QoreChain testnet/mainnet/localnet presets, precompile ABIs (0x...0901-0C01), prefix-free domain strings
-│   ├── types.ts                 # Strict TypeScript contracts for policies, hybrid envelopes, decisions, and audit bundles
-│   ├── crypto.ts                # FIPS-204 ML-DSA-87/65/44 (@qorechain/pqc) + FIPS-205 SLH-DSA + secp256k1/ed25519 + hybridSignBytes('v2')
-│   ├── policy-engine.ts         # Stateful spending caps, sliding velocity windows, allowlist/selector firewall, anti-replay, 6-vector attack simulator, SHAKE-256 + ML-DSA-87 audit ledger
+│   ├── networks.ts              # Verified QoreChain testnet/mainnet/localnet presets, precompile ABIs (0x...0901-0C01), 30d MAX_AGENT_LINK_TTL_SEC
+│   ├── types.ts                 # Strict TypeScript contracts for policies, Scoped EVM Windows, 30d link leases, qorechain-msg-v1, and audit bundles
+│   ├── crypto.ts                # FIPS-204 ML-DSA-87/65/44 (@qorechain/pqc) + FIPS-205 SLH-DSA + secp256k1/ed25519 + hybridSignBytes('v2') + qorechain-msg-v1
+│   ├── policy-engine.ts         # Stateful spending caps, Scoped EVM Windows, 30d link renewal, selector firewall, 6-vector breaker, SHAKE-256 + ML-DSA-87 ledger
 │   ├── guard.ts                 # Secret-input refusal guard (blocks private keys / BIP-39 mnemonics in MCP tool calls)
 │   ├── testnet-client.ts        # Live QoreX read-only RPC/precompile probe + env-var-driven turnkey guarded tx runner (honest simulation fallback)
 │   ├── registry-deployer.ts     # Turnkey QoreGuardPolicyRegistry gas estimator & EVM deployer
@@ -59,9 +62,11 @@ qoreguard/
 │       ├── deploy-registry.ts   # `npm run deploy:registry -- --dry-run` live EVM 9800 gas estimator & turnkey deployer
 │       ├── testnet-probe.ts     # `npm run probe:testnet` live QoreX read-only probe
 │       └── turnkey-tx.ts        # `npm run tx:turnkey` env-var-driven guarded tx / dry-run demo
-├── test/                        # 33 Vitest tests (crypto, policy-engine, MCP InMemory round-trip, testnet-client, registry-deployer)
+├── test/                        # 36 Vitest tests (crypto + qorechain-msg-v1, policy-engine + 30d TTL + Scoped Window, MCP, testnet, deployer)
 ├── web/                         # Interactive React 19 + Vite 6 + TypeScript console deployed to GitHub Pages (7 Vitest tests)
-├── docs/screenshots/            # Captured high-resolution UI screenshots
+├── docs/
+│   ├── cover-image.png          # 1200x630 Featured Cover Image for QoreChain submission
+│   └── screenshots/             # Captured high-resolution UI screenshots
 ├── AI_USAGE.md                  # AI-assisted engineering disclosure (Best AI-Native Build)
 └── SUBMISSION_READY.md          # Complete QoreChain Developer Fest submission checklist & evidence
 ```
@@ -85,7 +90,7 @@ Aligned with `@qorechain/mcp` (`structuredContent` + JSON content + secret-input
 
 ## Quickstart & Reproducibility
 
-### Core SDK, Policy Engine & MCP Server (`33 / 33` Vitest PASS)
+### Core SDK, Policy Engine & MCP Server (`36 / 36` Vitest PASS)
 
 ```bash
 npm install
@@ -94,7 +99,7 @@ npm run build
 npm test
 ```
 
-### On-Chain Smart Contract (`15 / 15` Foundry PASS, Slither `0 High / 0 Medium`)
+### On-Chain Smart Contract (`18 / 18` Foundry PASS, Slither `0 High / 0 Medium`)
 
 ```bash
 forge build

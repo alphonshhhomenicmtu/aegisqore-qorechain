@@ -22,8 +22,9 @@ import {
   signHybridIntent,
   verifyHybridEnvelope,
 } from "./crypto.js";
-import { QOREGUARD_DOMAINS } from "./networks.js";
+import { MAX_AGENT_LINK_TTL_SEC, QOREGUARD_DOMAINS } from "./networks.js";
 import type {
+  AgentLinkLease,
   AgentPolicy,
   AiPreflightSignal,
   AttackSimulationResult,
@@ -34,6 +35,7 @@ import type {
   HybridSignedEnvelope,
   PolicyDecision,
   QuantumAttackVector,
+  ScopedEvmWindowRule,
 } from "./types.js";
 
 const GENESIS_CHAIN_HASH = "0".repeat(64);
@@ -46,6 +48,7 @@ interface SpendEvent {
 
 export interface EvaluateOptions {
   readonly nowUnix?: number;
+  readonly blockNumber?: number;
   readonly aiSignal?: AiPreflightSignal;
 }
 
@@ -79,9 +82,109 @@ export class QoreGuardPolicyEngine {
   private readonly auditEntries: AuditLogEntry[] = [];
   private chainHeadHashHex: string = GENESIS_CHAIN_HASH;
 
+  private activeLink: AgentLinkLease | null = null;
+  private revoked = false;
+  private activeScopedWindow: ScopedEvmWindowRule | null = null;
+  private scopedWindowTxCount = 0;
+  private scopedWindowTotalValue = 0n;
+
   constructor(policy: AgentPolicy) {
+    if (
+      policy.agentLink &&
+      (policy.agentLink.expiresAtUnix <= policy.agentLink.linkedAtUnix ||
+        policy.agentLink.expiresAtUnix - policy.agentLink.linkedAtUnix > MAX_AGENT_LINK_TTL_SEC)
+    ) {
+      throw new RangeError(
+        `Owner-to-agent link TTL must be in (0, ${MAX_AGENT_LINK_TTL_SEC}] seconds (<= 30 days)`,
+      );
+    }
     this.policy = policy;
     this.policyHashHex = computePolicyHash(policy);
+    this.activeLink = policy.agentLink ? { ...policy.agentLink } : null;
+    this.activeScopedWindow = policy.scopedEvmWindow ? { ...policy.scopedEvmWindow } : null;
+  }
+
+  /** Links or renews an owner-to-agent lease, enforcing MAX_AGENT_LINK_TTL_SEC (30 days). */
+  public renewAgentLink(
+    ownerAddress: string,
+    newExpiresAtUnix: number,
+    nowUnix = Math.floor(Date.now() / 1000),
+  ): AgentLinkLease {
+    if (!ownerAddress.trim()) {
+      throw new Error("ownerAddress is required");
+    }
+    if (this.activeLink && normalizeAddress(this.activeLink.ownerAddress) !== normalizeAddress(ownerAddress)) {
+      throw new Error("Only the linked policy owner may renew the agent link");
+    }
+    const ttl = newExpiresAtUnix - nowUnix;
+    if (ttl <= 0 || ttl > MAX_AGENT_LINK_TTL_SEC) {
+      throw new RangeError(
+        `Renewal TTL (${ttl}s) must be > 0 and <= ${MAX_AGENT_LINK_TTL_SEC}s (30 days max)`,
+      );
+    }
+    this.activeLink = {
+      ownerAddress,
+      linkedAtUnix: nowUnix,
+      expiresAtUnix: newExpiresAtUnix,
+    };
+    this.revoked = false;
+    return { ...this.activeLink };
+  }
+
+  /** Immediately revokes the owner-to-agent link until the owner explicitly re-links. */
+  public revokeAgentLink(ownerAddress: string): void {
+    if (this.activeLink && normalizeAddress(this.activeLink.ownerAddress) !== normalizeAddress(ownerAddress)) {
+      throw new Error("Only the linked policy owner may revoke the agent link");
+    }
+    this.revoked = true;
+  }
+
+  public getAgentLinkStatus(nowUnix = Math.floor(Date.now() / 1000)): {
+    readonly configured: boolean;
+    readonly revoked: boolean;
+    readonly expired: boolean;
+    readonly lease: AgentLinkLease | null;
+    readonly maxTtlSec: number;
+  } {
+    return {
+      configured: this.activeLink !== null,
+      revoked: this.revoked,
+      expired: this.activeLink !== null && nowUnix > this.activeLink.expiresAtUnix,
+      lease: this.activeLink ? { ...this.activeLink } : null,
+      maxTtlSec: MAX_AGENT_LINK_TTL_SEC,
+    };
+  }
+
+  /** Opens or replaces a Scoped EVM Window (blocks, tx count, total value, allowed targets). */
+  public openScopedEvmWindow(window: ScopedEvmWindowRule): void {
+    if (window.endBlock < window.startBlock || window.maxTxCount <= 0) {
+      throw new RangeError("Invalid ScopedEvmWindowRule: require endBlock >= startBlock and maxTxCount > 0");
+    }
+    const maxVal = parseNonNegativeBigInt(window.maxTotalValueUqor);
+    if (maxVal === null || maxVal <= 0n) {
+      throw new RangeError("Invalid ScopedEvmWindowRule: maxTotalValueUqor must be a positive integer string");
+    }
+    this.activeScopedWindow = { ...window };
+    this.scopedWindowTxCount = 0;
+    this.scopedWindowTotalValue = 0n;
+  }
+
+  public closeScopedEvmWindow(): void {
+    this.activeScopedWindow = null;
+  }
+
+  public getScopedEvmWindowState(): {
+    readonly active: boolean;
+    readonly rule: ScopedEvmWindowRule | null;
+    readonly usedTxCount: number;
+    readonly usedTotalValueUqor: string;
+  } {
+    return {
+      active: this.activeScopedWindow !== null,
+      rule: this.activeScopedWindow ? { ...this.activeScopedWindow } : null,
+      usedTxCount: this.scopedWindowTxCount,
+      usedTotalValueUqor: this.scopedWindowTotalValue.toString(),
+    };
   }
 
   public getLastNonce(): number {
@@ -152,6 +255,24 @@ export class QoreGuardPolicyEngine {
     if (intent.expiresAtUnix < nowUnix) {
       codes.push("INTENT_EXPIRED");
       reasons.push(`Intent expired at ${intent.expiresAtUnix} (now=${nowUnix})`);
+    }
+
+    // 2b. Owner-to-agent 30-day link lease & revocation enforcement
+    if (this.revoked) {
+      codes.push("AGENT_REVOKED");
+      reasons.push("Owner-to-agent link has been revoked");
+    }
+    if (this.activeLink) {
+      if (this.activeLink.expiresAtUnix - this.activeLink.linkedAtUnix > MAX_AGENT_LINK_TTL_SEC) {
+        codes.push("AGENT_LINK_TTL_EXCEEDED");
+        reasons.push(`Agent link lease exceeds 30-day MAX_AGENT_LINK_TTL_SEC (${MAX_AGENT_LINK_TTL_SEC}s)`);
+      }
+      if (nowUnix > this.activeLink.expiresAtUnix) {
+        codes.push("AGENT_LINK_EXPIRED");
+        reasons.push(
+          `Owner-to-agent 30-day link expired at ${this.activeLink.expiresAtUnix} (now=${nowUnix}); call renewAgentLink()`,
+        );
+      }
     }
 
     // 3. Monotonic replay nonce enforcement
@@ -227,6 +348,38 @@ export class QoreGuardPolicyEngine {
       }
     }
 
+    // 5b. Scoped EVM Window bounds (startBlock, endBlock, maxTxCount, maxTotalValue, allowedTargets)
+    if (this.activeScopedWindow) {
+      const win = this.activeScopedWindow;
+      const evalBlock = options.blockNumber ?? intent.blockNumber;
+      if (evalBlock === undefined || evalBlock < win.startBlock || evalBlock > win.endBlock) {
+        codes.push("SCOPED_EVM_BLOCK_OUT_OF_RANGE");
+        reasons.push(
+          `Block ${evalBlock ?? "unspecified"} is outside Scoped EVM Window [${win.startBlock}, ${win.endBlock}]`,
+        );
+      }
+      if (this.scopedWindowTxCount + 1 > win.maxTxCount) {
+        codes.push("SCOPED_EVM_TX_COUNT_EXCEEDED");
+        reasons.push(
+          `Scoped EVM Window tx count ${this.scopedWindowTxCount + 1} exceeds maxTxCount ${win.maxTxCount}`,
+        );
+      }
+      const maxWinVal = parseNonNegativeBigInt(win.maxTotalValueUqor);
+      if (valueBn !== null && maxWinVal !== null && this.scopedWindowTotalValue + valueBn > maxWinVal) {
+        codes.push("SCOPED_EVM_VALUE_EXCEEDED");
+        reasons.push(
+          `Scoped EVM Window cumulative value ${this.scopedWindowTotalValue + valueBn} exceeds ${maxWinVal}`,
+        );
+      }
+      if (win.allowedTargets && win.allowedTargets.length > 0) {
+        const winAllow = new Set(win.allowedTargets.map(normalizeAddress));
+        if (!winAllow.has(toNorm) && !codes.includes("TARGET_NOT_ALLOWLISTED")) {
+          codes.push("TARGET_NOT_ALLOWLISTED");
+          reasons.push(`Target ${intent.to} is not permitted in active Scoped EVM Window`);
+        }
+      }
+    }
+
     // 6. Optional QoreChain IQoreAI risk/anomaly gate
     if (options.aiSignal) {
       if (options.aiSignal.anomalyFlagged) {
@@ -256,6 +409,10 @@ export class QoreGuardPolicyEngine {
         valueUqor: valueBn,
         nonce: intent.nonce,
       });
+      if (this.activeScopedWindow) {
+        this.scopedWindowTxCount += 1;
+        this.scopedWindowTotalValue += valueBn;
+      }
     }
 
     const decisionDigestHex = shake256Hex(

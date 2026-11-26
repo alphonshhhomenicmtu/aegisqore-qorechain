@@ -20,6 +20,12 @@ export type GuardRejectionCode =
   | "COMMITMENT_TAMPERED"
   | "PUBKEY_HASH_MISMATCH"
   | "INTENT_EXPIRED"
+  | "AGENT_LINK_EXPIRED"
+  | "AGENT_LINK_TTL_EXCEEDED"
+  | "AGENT_REVOKED"
+  | "SCOPED_EVM_BLOCK_OUT_OF_RANGE"
+  | "SCOPED_EVM_TX_COUNT_EXCEEDED"
+  | "SCOPED_EVM_VALUE_EXCEEDED"
   | "CHAIN_ID_MISMATCH"
   | "POLICY_HASH_MISMATCH"
   | "AGENT_ID_MISMATCH"
@@ -34,7 +40,53 @@ export type GuardRejectionCode =
   | "SELECTOR_FORBIDDEN"
   | "AI_RISK_THRESHOLD_EXCEEDED"
   | "AI_ANOMALY_FLAGGED"
+  | "AUTH_MSG_FORMAT_INVALID"
   | "INVALID_VALUE";
+
+export interface ScopedEvmWindowRule {
+  readonly startBlock: number;
+  readonly endBlock: number;
+  readonly maxTxCount: number;
+  readonly maxTotalValueUqor: string;
+  readonly allowedTargets?: readonly string[];
+}
+
+export interface AgentLinkLease {
+  readonly ownerAddress: string;
+  readonly linkedAtUnix: number;
+  readonly expiresAtUnix: number;
+}
+
+export interface AuthenticatedMessageEnvelope {
+  readonly format: "qorechain-msg-v1";
+  readonly chainId: string;
+  readonly dataHex: string;
+  readonly formattedMessageUtf8?: string;
+  readonly formattedMessageHex: string;
+  readonly messageKeccak256Hex: `0x${string}`;
+  readonly secp256k1: {
+    readonly evmAddress: string;
+    readonly publicKeyHex: string;
+    /** 65-byte recoverable ECDSA signature hex (`r[32] || s[32] || v[1]`). */
+    readonly signatureHex: string;
+  };
+  readonly mldsa87: {
+    readonly publicKeyHex: string;
+    readonly pubkeyHashHex: string;
+    readonly signatureHex: string;
+  };
+}
+
+export interface AuthenticatedMessageVerification {
+  readonly valid: boolean;
+  readonly formatValid: boolean;
+  readonly secp256k1Valid: boolean;
+  readonly mldsa87Valid: boolean;
+  readonly pubkeyHashMatches: boolean;
+  readonly recoveredEvmAddress: string | null;
+  readonly messageKeccak256Hex: `0x${string}` | null;
+  readonly codes: readonly GuardRejectionCode[];
+}
 
 export interface VelocityWindowRule {
   /** Human-readable window label (e.g. "5m_burst", "24h_daily"). */
@@ -77,6 +129,10 @@ export interface AgentPolicy {
   readonly maxAiRiskLevel?: number;
   /** If true, enforces gap-free strictly sequential nonces (lastNonce + 1). */
   readonly requireStrictSequentialNonce: boolean;
+  /** Optional owner-to-agent link lease (enforced <= 30 days MAX_AGENT_LINK_TTL_SEC). */
+  readonly agentLink?: AgentLinkLease;
+  /** Optional on-chain Scoped EVM Window bounds (startBlock, endBlock, maxTxCount, maxTotalValue, allowedTargets). */
+  readonly scopedEvmWindow?: ScopedEvmWindowRule;
 }
 
 export interface HybridAgentIdentity {
@@ -116,6 +172,8 @@ export interface TransactionIntent {
   readonly nonce: number;
   /** Expiration UNIX timestamp in seconds. */
   readonly expiresAtUnix: number;
+  /** Optional EVM block number for Scoped EVM Window evaluation. */
+  readonly blockNumber?: number;
   /** Optional human-readable intent memo. */
   readonly memo?: string;
 }

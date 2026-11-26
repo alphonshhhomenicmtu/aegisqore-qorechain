@@ -23,6 +23,8 @@ import { getAddress } from "viem";
 import { QOREGUARD_DOMAINS } from "./networks.js";
 import type {
   AgentPolicy,
+  AuthenticatedMessageEnvelope,
+  AuthenticatedMessageVerification,
   ClassicalAlgorithm,
   CryptoVerificationResult,
   GuardRejectionCode,
@@ -36,6 +38,9 @@ import type {
 } from "./types.js";
 
 const TEXT_ENCODER = new TextEncoder();
+const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
+
+export const QORECHAIN_AUTH_MSG_PREFIX = QOREGUARD_DOMAINS.authenticatedMessagePrefix;
 
 /** Numeric NIST post-quantum security rank for anti-downgrade comparison. */
 export const PQ_SECURITY_LEVEL: Readonly<Record<PqAlgorithm, number>> = {
@@ -475,5 +480,244 @@ export function verifyHybridEnvelope(
     downgradeDetected,
     codes,
     computedCommitmentHex,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Official QoreChain Authenticated Messaging (`qorechain-msg-v1|<chainId>|<data>`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Formats the canonical QoreChain authenticated message payload:
+ *   `qorechain-msg-v1|<chainId>|<data>`
+ * Rejects empty `chainId` or `|` delimiter characters inside `chainId` to
+ * prevent cross-field boundary collisions (byte-identical to QoreGuardPolicyRegistry.sol).
+ */
+export function formatQorechainAuthMessage(
+  chainId: string,
+  data: string | Uint8Array,
+): Uint8Array {
+  if (!chainId || chainId.includes("|")) {
+    throw new Error("Invalid chainId for qorechain-msg-v1: must be non-empty and contain no '|' delimiter");
+  }
+  const prefixBytes = TEXT_ENCODER.encode(`${QORECHAIN_AUTH_MSG_PREFIX}${chainId}|`);
+  const dataBytes = typeof data === "string" ? TEXT_ENCODER.encode(data) : data;
+  const out = new Uint8Array(prefixBytes.length + dataBytes.length);
+  out.set(prefixBytes, 0);
+  out.set(dataBytes, prefixBytes.length);
+  return out;
+}
+
+/**
+ * Signs an authenticated message in exact official QoreChain format
+ * (`qorechain-msg-v1|<chainId>|<data>`) using hybrid `secp256k1` (65-byte
+ * EVM-recoverable `r || s || v` over `keccak256(message)`) + FIPS-204 `ML-DSA-87`
+ * (`4,627`-byte signature over raw `message`).
+ */
+export function signAuthenticatedMessage(
+  identity: HybridAgentIdentity,
+  params: {
+    readonly chainId: string;
+    readonly data: string | Uint8Array;
+  },
+): AuthenticatedMessageEnvelope {
+  if (identity.classicalAlgorithm !== "secp256k1") {
+    throw new Error("qorechain-msg-v1 requires a secp256k1 classical keypair");
+  }
+  if (identity.pqAlgorithm !== "ml-dsa-87") {
+    throw new Error("qorechain-msg-v1 requires an ml-dsa-87 post-quantum keypair");
+  }
+
+  const dataBytes = typeof params.data === "string" ? TEXT_ENCODER.encode(params.data) : params.data;
+  const formatted = formatQorechainAuthMessage(params.chainId, dataBytes);
+  const msgDigest = keccak_256(formatted);
+
+  const rawSecpSig = secp256k1.sign(msgDigest, fromHex(identity.classicalSecretKeyHex)) as {
+    toCompactRawBytes: () => Uint8Array;
+    recovery?: number;
+  };
+  const compact64 = rawSecpSig.toCompactRawBytes();
+  const vByte = 27 + (rawSecpSig.recovery ?? 0);
+  const sig65 = new Uint8Array(65);
+  sig65.set(compact64, 0);
+  sig65[64] = vByte;
+
+  const pqSig = mldsa87.sign(fromHex(identity.pqSecretKeyHex), formatted);
+
+  let formattedUtf8: string | undefined;
+  try {
+    formattedUtf8 = TEXT_DECODER.decode(formatted);
+  } catch {
+    formattedUtf8 = undefined;
+  }
+
+  return {
+    format: "qorechain-msg-v1",
+    chainId: params.chainId,
+    dataHex: bytesToHex(dataBytes),
+    ...(formattedUtf8 !== undefined ? { formattedMessageUtf8: formattedUtf8 } : {}),
+    formattedMessageHex: bytesToHex(formatted),
+    messageKeccak256Hex: toHexPrefixed(msgDigest),
+    secp256k1: {
+      evmAddress: identity.evmAddress,
+      publicKeyHex: identity.classicalPublicKeyHex,
+      signatureHex: bytesToHex(sig65),
+    },
+    mldsa87: {
+      publicKeyHex: identity.pqPublicKeyHex,
+      pubkeyHashHex: identity.pqPubkeyHashHex,
+      signatureHex: bytesToHex(pqSig),
+    },
+  };
+}
+
+/**
+ * Verifies a hybrid `secp256k1` + `ML-DSA-87` authenticated message in
+ * `qorechain-msg-v1|<chainId>|<data>` format. Never throws on malformed input.
+ */
+export function verifyAuthenticatedMessage(
+  envelope: AuthenticatedMessageEnvelope,
+  expected: {
+    readonly chainId?: string;
+    readonly expectedEvmSigner?: string;
+    readonly expectedPqPubkeyHashHex?: string;
+  } = {},
+): AuthenticatedMessageVerification {
+  const codes: GuardRejectionCode[] = [];
+
+  if (!envelope || envelope.format !== "qorechain-msg-v1") {
+    codes.push("AUTH_MSG_FORMAT_INVALID");
+    return {
+      valid: false,
+      formatValid: false,
+      secp256k1Valid: false,
+      mldsa87Valid: false,
+      pubkeyHashMatches: false,
+      recoveredEvmAddress: null,
+      messageKeccak256Hex: null,
+      codes,
+    };
+  }
+
+  if (expected.chainId !== undefined && envelope.chainId !== expected.chainId) {
+    codes.push("CHAIN_ID_MISMATCH");
+  }
+
+  let formatted: Uint8Array;
+  let formatValid = false;
+  try {
+    const dataBytes = fromHex(envelope.dataHex);
+    formatted = formatQorechainAuthMessage(envelope.chainId, dataBytes);
+    const expectedHex = bytesToHex(formatted);
+    formatValid = expectedHex === (envelope.formattedMessageHex ?? "").toLowerCase();
+    if (!formatValid) {
+      codes.push("COMMITMENT_TAMPERED");
+    }
+  } catch {
+    codes.push("AUTH_MSG_FORMAT_INVALID");
+    return {
+      valid: false,
+      formatValid: false,
+      secp256k1Valid: false,
+      mldsa87Valid: false,
+      pubkeyHashMatches: false,
+      recoveredEvmAddress: null,
+      messageKeccak256Hex: null,
+      codes,
+    };
+  }
+
+  const digest = keccak_256(formatted);
+  const computedKeccakHex = toHexPrefixed(digest);
+  if (computedKeccakHex.toLowerCase() !== (envelope.messageKeccak256Hex ?? "").toLowerCase()) {
+    if (!codes.includes("COMMITMENT_TAMPERED")) {
+      codes.push("COMMITMENT_TAMPERED");
+    }
+  }
+
+  // 1. Recover and verify 65-byte secp256k1 signature over keccak256(formatted)
+  let secp256k1Valid = false;
+  let recoveredEvmAddress: string | null = null;
+  try {
+    const sigBytes = fromHex(envelope.secp256k1?.signatureHex ?? "");
+    if (sigBytes.length === 65) {
+      const rawV = sigBytes[64]!;
+      const normalizedV = rawV < 27 ? rawV + 27 : rawV;
+      if (normalizedV === 27 || normalizedV === 28) {
+        const parsed = secp256k1.Signature.fromCompact(sigBytes.slice(0, 64));
+        if (!parsed.hasHighS()) {
+          const recPt = parsed.addRecoveryBit(normalizedV - 27).recoverPublicKey(digest);
+          const rawUncompressed = recPt.toRawBytes
+            ? recPt.toRawBytes(false)
+            : (recPt as unknown as { toBytes: (c: boolean) => Uint8Array }).toBytes(false);
+          recoveredEvmAddress = deriveEvmAddressFromSecpPubkey(rawUncompressed);
+          const claimedAddr = getAddress(envelope.secp256k1.evmAddress);
+          const pubkeyDerivedAddr = deriveEvmAddressFromSecpPubkey(fromHex(envelope.secp256k1.publicKeyHex));
+          const expectedSignerMatches = expected.expectedEvmSigner
+            ? recoveredEvmAddress.toLowerCase() === expected.expectedEvmSigner.toLowerCase()
+            : true;
+          secp256k1Valid =
+            recoveredEvmAddress === claimedAddr &&
+            recoveredEvmAddress === pubkeyDerivedAddr &&
+            expectedSignerMatches;
+        }
+      }
+    }
+  } catch {
+    secp256k1Valid = false;
+  }
+  if (!secp256k1Valid) {
+    codes.push("CLASSICAL_SIGNATURE_INVALID");
+  }
+
+  // 2. Verify FIPS-204 ML-DSA-87 signature (2,592B pubkey + 4,627B signature) over raw formatted bytes
+  let mldsa87Valid = false;
+  let pubkeyHashMatches = false;
+  if (!envelope.mldsa87 || !envelope.mldsa87.signatureHex) {
+    codes.push("QUANTUM_DOWNGRADE_CLASSICAL_ONLY");
+    codes.push("PQC_SIGNATURE_MISSING");
+  } else {
+    try {
+      const pqPk = fromHex(envelope.mldsa87.publicKeyHex);
+      const pqSig = fromHex(envelope.mldsa87.signatureHex);
+      if (pqPk.length !== 2592 || pqSig.length !== 4627) {
+        codes.push("QUANTUM_DOWNGRADE_WEAK_ALGORITHM");
+      } else {
+        const actualHash = bytesToHex(pubkeyHash(pqPk, 32));
+        const claimedHashMatches = actualHash === envelope.mldsa87.pubkeyHashHex.toLowerCase();
+        const expectedHashMatches = expected.expectedPqPubkeyHashHex
+          ? actualHash === expected.expectedPqPubkeyHashHex.toLowerCase()
+          : true;
+        pubkeyHashMatches = claimedHashMatches && expectedHashMatches;
+        if (!pubkeyHashMatches) {
+          codes.push("PUBKEY_HASH_MISMATCH");
+        }
+        mldsa87Valid = mldsa87.verify(pqPk, formatted, pqSig);
+        if (!mldsa87Valid) {
+          codes.push("PQC_SIGNATURE_INVALID");
+        }
+      }
+    } catch {
+      mldsa87Valid = false;
+      codes.push("PQC_SIGNATURE_INVALID");
+    }
+  }
+
+  const valid =
+    codes.length === 0 &&
+    formatValid &&
+    secp256k1Valid &&
+    mldsa87Valid &&
+    pubkeyHashMatches;
+
+  return {
+    valid,
+    formatValid,
+    secp256k1Valid,
+    mldsa87Valid,
+    pubkeyHashMatches,
+    recoveredEvmAddress,
+    messageKeccak256Hex: computedKeccakHex,
+    codes,
   };
 }

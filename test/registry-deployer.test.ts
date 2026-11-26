@@ -15,6 +15,9 @@ describe("QoreGuardPolicyRegistry Deployer & Dry-Run Gas Estimator", () => {
     expect(QOREGUARD_REGISTRY_BYTECODE_BYTES).toBeLessThan(24576);
     const fnNames = QOREGUARD_REGISTRY_ABI.filter((x) => x.type === "function").map((x) => x.name);
     expect(fnNames).toContain("registerAgentPolicy");
+    expect(fnNames).toContain("renewAgentLink");
+    expect(fnNames).toContain("openScopedEvmWindow");
+    expect(fnNames).toContain("verifyAuthenticatedMessage");
     expect(fnNames).toContain("authorizeAction");
     expect(fnNames).toContain("evaluateAndLogAction");
     expect(fnNames).toContain("revokeAgent");
