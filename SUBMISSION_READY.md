@@ -30,11 +30,11 @@
   - **On-Chain Scoped EVM Windows (`openScopedEvmWindow`)**: Enforces `[startBlock, endBlock]`, `maxTxCount`, `maxTotalValue`, and window-scoped `allowedTargets` (`REASON_SCOPED_BLOCK_OUT_OF_RANGE`, `REASON_SCOPED_TX_COUNT_EXCEEDED`, `REASON_SCOPED_VALUE_CAP_EXCEEDED`).
   - **Official Authenticated Messaging (`qorechain-msg-v1|<chainId>|<data>`)**: Prefix-free framing (`formatAuthenticatedMessage`) + hybrid `secp256k1` (`ecrecover` with EIP-2 low-S check) + `ML-DSA-87` (`0x...0A01`) verification (`verifyAuthenticatedMessage`, `verifyAgentAuthenticatedMessage`) mirrored byte-for-byte in `src/crypto.ts` (`signAuthenticatedMessage`, `verifyAuthenticatedMessage`).
   - Per-agent ML-DSA-87 pubkey hash, single-tx spend cap, O(1) two-epoch sliding-window daily cap, target/selector allowlist & default forbidden `approve`/`setApprovalForAll` firewall, strict monotonic anti-replay nonce, emergency owner revocation, and `PolicyApproved` / `PolicyRejected` / `AgentRevoked` commitment events.
-  - **Foundry Suite (`contracts/test/QoreGuardPolicyRegistry.t.sol`)**: **`18 / 18` PASS** (using `vm.etch` precompile mocks + 256-run spend-cap fuzzing + 30d TTL/renewal + Scoped EVM Window + `qorechain-msg-v1` tests).
+  - **Foundry Suite (`contracts/test/QoreGuardPolicyRegistry.t.sol` + `contracts/test/AegisQoreInvariants.t.sol`)**: **`24 / 24` PASS** (`18/18` unit/fuzz tests using `vm.etch` precompile mocks + `6/6` stateful Handler invariants across `256` runs / `8,192` fuzz calls covering caps, 30d `MAX_LINK_TTL`, revocation, `qorechain-msg-v1` anti-replay, Scoped EVM Windows, and owner/ML-DSA-87 enforcement).
   - **Slither Static Analysis (`0.11.6`, 102 detectors)**: **`0 High / 0 Medium / 0 Optimization`**.
-  - **Live QoreX EVM 9800 Dry-Run Deployment Gas Estimate (`npm run deploy:registry -- --dry-run`)**: **`3,480,337` gas** (`0.3915379125 QOR` at `112.5 gwei`, live block `10,802,524`, `15,896`-byte Solc `0.8.28` `paris` bytecode, SHA-256 `7c304cb19182a0168484b348a6e968912d3863bae10fc6b56a7c5c7787c2cdce`).
-- **Automated Verification (`62 / 62` PASS)**:
-  - On-Chain Contract (Foundry): `forge test -vv` → **18 / 18 PASS** + Slither **0 High / 0 Medium**.
+  - **Live QoreX EVM 9800 Dry-Run Deployment Gas Estimate (`npm run deploy:registry -- --dry-run`)**: **`3,480,337` gas** (`0.3915379125 QOR` at `112.5 gwei`, live block `10,811,099`, `15,896`-byte Solc `0.8.28` `paris` bytecode, SHA-256 `7c304cb19182a0168484b348a6e968912d3863bae10fc6b56a7c5c7787c2cdce`).
+- **Automated Verification (`68 / 68` PASS)**:
+  - On-Chain Contract (Foundry): `forge test -v` → **24 / 24 PASS** (`18` unit/fuzz + `6` stateful invariants @ `256` runs / `8,192` calls) + Slither **0 High / 0 Medium**.
   - Core SDK + Policy Engine + MCP Server + Registry Deployer: `npm run typecheck`, `npm run build`, `npm test` → **36 / 36 Vitest PASS**.
   - Interactive Web Console (`web/`): `npm run typecheck`, `npm test`, `npm run build` → **8 / 8 Vitest PASS**, deployed live to GitHub Pages (`0` console errors, `0` page errors).
 
@@ -72,5 +72,5 @@
 - [x] 1080p demo video ≤ 3 min uploaded to YouTube (`108s`) + public Google Drive mirror
 - [x] `README.md` with live QoreX Testnet evidence, `1200×630` featured cover image (`docs/cover-image.png`), screenshots, quickstart, and open-source credits
 - [x] `AI_USAGE.md` documenting AI-native workflow and human/automated verification
-- [x] On-chain `QoreGuardPolicyRegistry.sol` verified (`18/18` Foundry PASS, Slither `0 High / 0 Medium`, live EVM 9800 dry-run `3,480,337` gas)
-- [x] Zero hardcoded secrets / private keys, zero non-English artifacts, 62/62 automated tests passing
+- [x] On-chain `QoreGuardPolicyRegistry.sol` verified (`24/24` Foundry PASS incl. `6/6` stateful invariants @ `256` runs / `8,192` calls, Slither `0 High / 0 Medium`, live EVM 9800 dry-run `3,480,337` gas)
+- [x] Zero hardcoded secrets / private keys, zero non-English artifacts, 68/68 automated tests passing

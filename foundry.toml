@@ -10,6 +10,11 @@ optimizer = true
 optimizer_runs = 200
 via_ir = false
 
+[invariant]
+runs = 256
+depth = 32
+fail_on_revert = false
+
 [rpc_endpoints]
 qorechain_testnet = "https://evm-testnet.qore.host"
 qorechain_mainnet = "https://evm.qore.host"
