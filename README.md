@@ -25,7 +25,7 @@ Running `npm run probe:testnet` executes a real read-only probe against **QoreCh
   - Enforces **30-day maximum owner-to-agent link TTL** (`MAX_LINK_TTL = 30 days`, `renewAgentLink()`, `relinkAgentKey()`), **Scoped EVM Windows** (`openScopedEvmWindow(agent, startBlock, endBlock, maxTxCount, maxTotalValue, windowTargets)`), official **`qorechain-msg-v1|<chainId>|<data>`** hybrid `secp256k1 + ML-DSA-87` message verification (`verifyAuthenticatedMessage` & `verifyAgentAuthenticatedMessage`), per-tx & O(1) two-epoch sliding-window daily caps, target/selector allowlists (default-blocking `approve` and `setApprovalForAll`), strict monotonic nonces, emergency owner revocation, and tamper-evident `PolicyApproved` / `PolicyRejected` / `AgentRevoked` events.
   - **Live QoreX EVM 9800 Dry-Run Gas Estimate (`npm run deploy:registry -- --dry-run`)**: **`3,480,337` gas** (`0.3915379125 QOR` @ `112.5 gwei`, block `10,802,524`, `15,896`-byte Solc `0.8.28` `paris` creation bytecode, SHA-256 `7c304cb1...87c2cdce`).
   - **Static Security Audit (`Slither 0.11.6`, 102 detectors)**: **`0 High / 0 Medium / 0 Optimization`** findings.
-- **Automated Test Suites**: **61 / 61 PASS** (`18/18` Foundry incl. 256-run fuzz + `36/36` core Vitest incl. InMemory MCP round-trip + `7/7` web Vitest)
+- **Automated Test Suites**: **62 / 62 PASS** (`18/18` Foundry incl. 256-run fuzz + `36/36` core Vitest incl. InMemory MCP round-trip + `8/8` web Vitest)
 
 ---
 
@@ -63,7 +63,7 @@ qoreguard/
 │       ├── testnet-probe.ts     # `npm run probe:testnet` live QoreX read-only probe
 │       └── turnkey-tx.ts        # `npm run tx:turnkey` env-var-driven guarded tx / dry-run demo
 ├── test/                        # 36 Vitest tests (crypto + qorechain-msg-v1, policy-engine + 30d TTL + Scoped Window, MCP, testnet, deployer)
-├── web/                         # Interactive React 19 + Vite 6 + TypeScript console deployed to GitHub Pages (7 Vitest tests)
+├── web/                         # Interactive React 19 + Vite 6 + TypeScript console deployed to GitHub Pages (8 Vitest tests)
 ├── docs/
 │   ├── cover-image.png          # 1200x630 Featured Cover Image for QoreChain submission
 │   └── screenshots/             # Captured high-resolution UI screenshots
@@ -126,7 +126,7 @@ npm run tx:turnkey
 node dist/mcp/bin.js --network testnet
 ```
 
-### Interactive Web Console (`7 / 7` Vitest PASS)
+### Interactive Web Console (`8 / 8` Vitest PASS)
 
 ```bash
 cd web

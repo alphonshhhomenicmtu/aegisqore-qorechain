@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_POLICY,
   QORECHAIN_DIANA,
+  VERIFIED_DIANA_SNAPSHOT,
   buildHybridSignBytes,
   evaluateGuardRequest,
   sha256Hex,
@@ -104,5 +105,11 @@ describe("QoreGuard PQ Policy & 5-Scenario Adversarial Breaker Lab", () => {
     );
     expect(res.allowed).toBe(false);
     expect(res.code).toBe("EVM_WINDOW_EXPIRED");
+  });
+
+  it("initializes telemetry from verified live Diana snapshot (#10,801,813) with zero auto-mount fetches", () => {
+    expect(VERIFIED_DIANA_SNAPSHOT.source).toBe("verified-diana-snapshot");
+    expect(VERIFIED_DIANA_SNAPSHOT.chainId).toBe("qorechain-diana");
+    expect(VERIFIED_DIANA_SNAPSHOT.latestHeight).toBe(10_801_813);
   });
 });

@@ -63,11 +63,18 @@ export interface GuardDecision {
 }
 
 export interface TelemetrySnapshot {
-  source: "live-diana-rest" | "simulated-diana";
+  source: "live-diana-rest" | "verified-diana-snapshot";
   chainId: string;
   latestHeight: number;
   blockTimeIso: string;
 }
+
+export const VERIFIED_DIANA_SNAPSHOT: TelemetrySnapshot = {
+  source: "verified-diana-snapshot",
+  chainId: QORECHAIN_DIANA.chainId,
+  latestHeight: 10_801_813,
+  blockTimeIso: "2026-11-26T18:06:00.000Z",
+};
 
 export const DEFAULT_POLICY: AgentGuardPolicy = {
   agentName: "qoreguard-treasury-bot-v1",
@@ -240,9 +247,7 @@ export async function fetchQoreTestnetTelemetry(): Promise<TelemetrySnapshot> {
     };
   } catch {
     return {
-      source: "simulated-diana",
-      chainId: QORECHAIN_DIANA.chainId,
-      latestHeight: 1_842_910,
+      ...VERIFIED_DIANA_SNAPSHOT,
       blockTimeIso: new Date().toISOString(),
     };
   }

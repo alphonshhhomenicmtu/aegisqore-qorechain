@@ -32,10 +32,10 @@
   - **Foundry Suite (`contracts/test/QoreGuardPolicyRegistry.t.sol`)**: **`18 / 18` PASS** (using `vm.etch` precompile mocks + 256-run spend-cap fuzzing + 30d TTL/renewal + Scoped EVM Window + `qorechain-msg-v1` tests).
   - **Slither Static Analysis (`0.11.6`, 102 detectors)**: **`0 High / 0 Medium / 0 Optimization`**.
   - **Live QoreX EVM 9800 Dry-Run Deployment Gas Estimate (`npm run deploy:registry -- --dry-run`)**: **`3,480,337` gas** (`0.3915379125 QOR` at `112.5 gwei`, live block `10,802,524`, `15,896`-byte Solc `0.8.28` `paris` bytecode, SHA-256 `7c304cb19182a0168484b348a6e968912d3863bae10fc6b56a7c5c7787c2cdce`).
-- **Automated Verification (`61 / 61` PASS)**:
+- **Automated Verification (`62 / 62` PASS)**:
   - On-Chain Contract (Foundry): `forge test -vv` → **18 / 18 PASS** + Slither **0 High / 0 Medium**.
   - Core SDK + Policy Engine + MCP Server + Registry Deployer: `npm run typecheck`, `npm run build`, `npm test` → **36 / 36 Vitest PASS**.
-  - Interactive Web Console (`web/`): `npm run typecheck`, `npm test`, `npm run build` → **7 / 7 Vitest PASS**, deployed live to GitHub Pages.
+  - Interactive Web Console (`web/`): `npm run typecheck`, `npm test`, `npm run build` → **8 / 8 Vitest PASS**, deployed live to GitHub Pages (`0` console errors, `0` page errors).
 
 ---
 
@@ -72,4 +72,4 @@
 - [x] `README.md` with live QoreX Testnet evidence, `1200×630` featured cover image (`docs/cover-image.png`), screenshots, quickstart, and open-source credits
 - [x] `AI_USAGE.md` documenting AI-native workflow and human/automated verification
 - [x] On-chain `QoreGuardPolicyRegistry.sol` verified (`18/18` Foundry PASS, Slither `0 High / 0 Medium`, live EVM 9800 dry-run `3,480,337` gas)
-- [x] Zero hardcoded secrets / private keys, zero non-English artifacts, 61/61 automated tests passing
+- [x] Zero hardcoded secrets / private keys, zero non-English artifacts, 62/62 automated tests passing

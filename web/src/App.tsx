@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   DEFAULT_POLICY,
   QORECHAIN_DIANA,
+  VERIFIED_DIANA_SNAPSHOT,
   buildHybridSignBytes,
   evaluateGuardRequest,
   fetchQoreTestnetTelemetry,
@@ -23,23 +24,21 @@ export default function App() {
     () => new Set(["nonce-0001-consumed"])
   );
   const [traces, setTraces] = useState<TraceEntry[]>([]);
-  const [telemetry, setTelemetry] = useState<TelemetrySnapshot>({
-    source: "simulated-diana",
-    chainId: QORECHAIN_DIANA.chainId,
-    latestHeight: 1_842_910,
-    blockTimeIso: new Date().toISOString(),
-  });
+  const [telemetry, setTelemetry] = useState<TelemetrySnapshot>(
+    VERIFIED_DIANA_SNAPSHOT
+  );
   const [seq, setSeq] = useState<number>(2);
   const [exportStatus, setExportStatus] = useState<string>("");
 
   async function refreshTelemetry(): Promise<void> {
     const snap = await fetchQoreTestnetTelemetry();
     setTelemetry(snap);
+    if (snap.source === "verified-diana-snapshot") {
+      setExportStatus(
+        "Direct browser fetch blocked by *.qore.host CORS; using CLI-verified Diana snapshot (#10,801,813). Run `npm run probe:testnet` locally for direct RPC."
+      );
+    }
   }
-
-  useEffect(() => {
-    void refreshTelemetry();
-  }, []);
 
   function resetConsole(): void {
     setPolicy(DEFAULT_POLICY);
@@ -162,7 +161,9 @@ export default function App() {
           <span className="mono muted">Source: {telemetry.source}</span>
           <span className="mono muted">RPC: {QORECHAIN_DIANA.rpcUrl}</span>
         </div>
-        <button onClick={() => void refreshTelemetry()}>Refresh Telemetry</button>
+        <button onClick={() => void refreshTelemetry()}>
+          Probe Live RPC (Opt-In)
+        </button>
       </div>
 
       {/* Header */}
