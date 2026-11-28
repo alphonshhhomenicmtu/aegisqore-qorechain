@@ -104,6 +104,7 @@ contract QoreGuardPolicyRegistry {
     error InvalidScopedWindow();
     error InvalidAuthMessageFormat();
     error NotPolicyOwner();
+    error AgentNotController();
     error PolicyRejectedError(bytes32 reasonCode, bytes32 commitmentHash);
 
     // -------------------------------------------------------------------------
@@ -274,14 +275,26 @@ contract QoreGuardPolicyRegistry {
     // -------------------------------------------------------------------------
 
     /// @notice Registers or updates a scoped post-quantum policy for `input.agent`.
-    /// @dev Enforces `input.validUntil <= block.timestamp + MAX_LINK_TTL` (30 days max owner-agent link)
-    ///      and pre-seeds dangerous ERC-20 / ERC-721 approval selectors in `forbiddenSelectors`.
+    /// @dev The first registration must be sent by `input.agent` itself. A later update
+    ///      must come from that same owner. This stops a third party from binding a
+    ///      public key to an agent address they do not control (and later emitting
+    ///      `PolicyApproved` under that binding). Also enforces
+    ///      `input.validUntil <= block.timestamp + MAX_LINK_TTL` (30 days) and pre-seeds
+    ///      dangerous ERC-20 / ERC-721 approval selectors in `forbiddenSelectors`.
     function registerAgentPolicy(
         RegistrationInput calldata input,
         address[] calldata initialTargets,
         bytes4[] calldata initialSelectors
     ) external {
         if (input.agent == address(0)) revert ZeroAddress();
+
+        AgentPolicy storage existing = _policies[input.agent];
+        if (existing.owner == address(0)) {
+            if (msg.sender != input.agent) revert AgentNotController();
+        } else if (existing.owner != msg.sender) {
+            revert NotPolicyOwner();
+        }
+
         if (
             input.pqPubkeyHash == bytes32(0) ||
             input.maxSingleTxAmount == 0 ||
@@ -294,11 +307,6 @@ contract QoreGuardPolicyRegistry {
         uint64 maxLinkExpiry = uint64(block.timestamp) + MAX_LINK_TTL;
         if (input.validUntil > maxLinkExpiry) {
             revert LinkTtlExceeded();
-        }
-
-        AgentPolicy storage existing = _policies[input.agent];
-        if (existing.owner != address(0) && existing.owner != msg.sender) {
-            revert NotPolicyOwner();
         }
 
         existing.owner = msg.sender;

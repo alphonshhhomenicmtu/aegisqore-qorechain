@@ -12,6 +12,7 @@ import { getQoreNetwork, type QoreNetworkName } from "../networks.js";
 import {
   createSignedAgentEnvelope,
   QoreGuardPolicyEngine,
+  StaleEvaluationClockError,
   verifyAuditBundle,
 } from "../policy-engine.js";
 import { probeQoreXNetwork } from "../testnet-client.js";
@@ -156,6 +157,9 @@ async function safeToolCall(
     if (err instanceof SecretInputError) {
       return errorResult(err.code, err.message);
     }
+    if (err instanceof StaleEvaluationClockError) {
+      return errorResult(err.code, err.message);
+    }
     const msg = err instanceof Error ? err.message : String(err);
     return errorResult("INTERNAL_ERROR", msg);
   }
@@ -198,7 +202,13 @@ export function createQoreGuardMcpServer(options: QoreGuardMcpOptions = {}): Qor
       inputSchema: {
         envelope: EnvelopeSchema,
         commit: z.boolean().default(true).describe("If true, commits nonce/spend/audit state on ALLOW and records DENY attempts."),
-        nowUnix: z.number().int().optional().describe("Optional evaluation timestamp in UNIX seconds."),
+        nowUnix: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            "Optional UNIX seconds. Omitted values use the system wall clock. Stale or future values outside a 30s skew are rejected and cannot backdate or delay expiry. Test-clock injection is not available on this tool.",
+          ),
         aiSignal: AiSignalSchema,
       },
       annotations: {
@@ -232,7 +242,13 @@ export function createQoreGuardMcpServer(options: QoreGuardMcpOptions = {}): Qor
         "Side-effect-free pre-flight evaluation of a hybrid post-quantum transaction envelope against active QoreGuard spending caps, rolling velocity windows, allowlist/selector firewall, and anti-downgrade rules.",
       inputSchema: {
         envelope: EnvelopeSchema,
-        nowUnix: z.number().int().optional(),
+        nowUnix: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            "Optional UNIX seconds. Omitted values use the system wall clock. Stale or future values outside a 30s skew are rejected and cannot backdate or delay expiry. Test-clock injection is not available on this tool.",
+          ),
         aiSignal: AiSignalSchema,
       },
       annotations: {

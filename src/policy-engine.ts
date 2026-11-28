@@ -46,10 +46,50 @@ interface SpendEvent {
   readonly nonce: number;
 }
 
+export class StaleEvaluationClockError extends Error {
+  readonly code = "STALE_EVALUATION_CLOCK";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "StaleEvaluationClockError";
+  }
+}
+
+/** Caller timestamps inside this skew are clamped to the wall clock. Beyond it, they are rejected. */
+export const EVAL_CLOCK_SKEW_SEC = 30;
+
 export interface EvaluateOptions {
   readonly nowUnix?: number;
   readonly blockNumber?: number;
   readonly aiSignal?: AiPreflightSignal;
+  /**
+   * Unit-test only. When true, `nowUnix` is used as given.
+   * Production MCP and SDK callers must leave this unset so expiry follows the wall clock.
+   */
+  readonly allowTestClock?: boolean;
+}
+
+/**
+ * Production clock for policy evaluation.
+ * Omits the caller timestamp by default. A supplied `nowUnix` is clamped to the
+ * wall clock inside `EVAL_CLOCK_SKEW_SEC` and rejected when it is stale or future
+ * enough to bypass expiry, unless `allowTestClock` is set.
+ */
+export function resolveEvaluationNowUnix(options: EvaluateOptions = {}): number {
+  const wall = Math.floor(Date.now() / 1000);
+  if (options.nowUnix === undefined) return wall;
+  if (!Number.isInteger(options.nowUnix)) {
+    throw new StaleEvaluationClockError("nowUnix must be an integer UNIX timestamp in seconds");
+  }
+  if (options.allowTestClock === true) return options.nowUnix;
+  const delta = options.nowUnix - wall;
+  if (delta < -EVAL_CLOCK_SKEW_SEC || delta > EVAL_CLOCK_SKEW_SEC) {
+    throw new StaleEvaluationClockError(
+      `Caller nowUnix ${options.nowUnix} is ${Math.abs(delta)}s from wall clock ${wall} (limit ${EVAL_CLOCK_SKEW_SEC}s). ` +
+        "Stale or future clocks cannot bypass expiry. Omit nowUnix, or set allowTestClock only inside unit tests.",
+    );
+  }
+  return wall;
 }
 
 function parseNonNegativeBigInt(raw: string): bigint | null {
@@ -108,15 +148,19 @@ export class QoreGuardPolicyEngine {
   public renewAgentLink(
     ownerAddress: string,
     newExpiresAtUnix: number,
-    nowUnix = Math.floor(Date.now() / 1000),
+    nowUnix?: number,
+    allowTestClock = false,
   ): AgentLinkLease {
+    const resolvedNow = resolveEvaluationNowUnix(
+      nowUnix === undefined ? { allowTestClock } : { nowUnix, allowTestClock },
+    );
     if (!ownerAddress.trim()) {
       throw new Error("ownerAddress is required");
     }
     if (this.activeLink && normalizeAddress(this.activeLink.ownerAddress) !== normalizeAddress(ownerAddress)) {
       throw new Error("Only the linked policy owner may renew the agent link");
     }
-    const ttl = newExpiresAtUnix - nowUnix;
+    const ttl = newExpiresAtUnix - resolvedNow;
     if (ttl <= 0 || ttl > MAX_AGENT_LINK_TTL_SEC) {
       throw new RangeError(
         `Renewal TTL (${ttl}s) must be > 0 and <= ${MAX_AGENT_LINK_TTL_SEC}s (30 days max)`,
@@ -124,7 +168,7 @@ export class QoreGuardPolicyEngine {
     }
     this.activeLink = {
       ownerAddress,
-      linkedAtUnix: nowUnix,
+      linkedAtUnix: resolvedNow,
       expiresAtUnix: newExpiresAtUnix,
     };
     this.revoked = false;
@@ -139,17 +183,20 @@ export class QoreGuardPolicyEngine {
     this.revoked = true;
   }
 
-  public getAgentLinkStatus(nowUnix = Math.floor(Date.now() / 1000)): {
+  public getAgentLinkStatus(nowUnix?: number, allowTestClock = false): {
     readonly configured: boolean;
     readonly revoked: boolean;
     readonly expired: boolean;
     readonly lease: AgentLinkLease | null;
     readonly maxTtlSec: number;
   } {
+    const resolvedNow = resolveEvaluationNowUnix(
+      nowUnix === undefined ? { allowTestClock } : { nowUnix, allowTestClock },
+    );
     return {
       configured: this.activeLink !== null,
       revoked: this.revoked,
-      expired: this.activeLink !== null && nowUnix > this.activeLink.expiresAtUnix,
+      expired: this.activeLink !== null && resolvedNow > this.activeLink.expiresAtUnix,
       lease: this.activeLink ? { ...this.activeLink } : null,
       maxTtlSec: MAX_AGENT_LINK_TTL_SEC,
     };
@@ -225,7 +272,7 @@ export class QoreGuardPolicyEngine {
     commit: boolean,
     options: EvaluateOptions = {},
   ): PolicyDecision {
-    const nowUnix = options.nowUnix ?? Math.floor(Date.now() / 1000);
+    const nowUnix = resolveEvaluationNowUnix(options);
     const { intent } = envelope;
     const codes: GuardRejectionCode[] = [];
     const reasons: string[] = [];

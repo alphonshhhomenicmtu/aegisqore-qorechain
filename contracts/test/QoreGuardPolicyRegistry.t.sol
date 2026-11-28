@@ -162,7 +162,7 @@ contract QoreGuardPolicyRegistryTest {
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = SEL_TRANSFER;
 
-        vm.prank(OWNER);
+        vm.prank(AGENT);
         registry.registerAgentPolicy(
             QoreGuardPolicyRegistry.RegistrationInput({
                 agent: AGENT,
@@ -466,7 +466,7 @@ contract QoreGuardPolicyRegistryTest {
         vm.expectRevert(QoreGuardPolicyRegistry.NotPolicyOwner.selector);
         registry.revokeAgent(AGENT, keccak256("hijack"));
 
-        vm.prank(OWNER);
+        vm.prank(AGENT);
         registry.revokeAgent(AGENT, keccak256("prompt-injection-detected"));
         assert(registry.getPolicy(AGENT).revoked == true);
         assert(registry.getPolicy(AGENT).active == false);
@@ -559,7 +559,7 @@ contract QoreGuardPolicyRegistryTest {
         selectors[0] = SEL_TRANSFER;
 
         // 1. Registering with validUntil > 30 days reverts with LinkTtlExceeded
-        vm.prank(OWNER);
+        vm.prank(AGENT);
         vm.expectRevert(QoreGuardPolicyRegistry.LinkTtlExceeded.selector);
         registry.registerAgentPolicy(
             QoreGuardPolicyRegistry.RegistrationInput({
@@ -584,12 +584,12 @@ contract QoreGuardPolicyRegistryTest {
         vm.expectRevert(QoreGuardPolicyRegistry.NotPolicyOwner.selector);
         registry.renewAgentLink(AGENT, uint64(block.timestamp + 14 days));
 
-        vm.prank(OWNER);
+        vm.prank(AGENT);
         vm.expectRevert(QoreGuardPolicyRegistry.LinkTtlExceeded.selector);
         registry.renewAgentLink(AGENT, uint64(block.timestamp + 30 days + 1));
 
         // 3. Renew link to full 30-day ceiling, then warp past 30 days -> reverts with REASON_AGENT_LINK_EXPIRED
-        vm.prank(OWNER);
+        vm.prank(AGENT);
         registry.renewAgentLink(AGENT, uint64(block.timestamp + 30 days));
         assert(registry.getPolicy(AGENT).linkExpiresAt == uint64(block.timestamp + 30 days));
 
@@ -613,7 +613,7 @@ contract QoreGuardPolicyRegistryTest {
         registry.authorizeAction(expiredLinkReq);
 
         // 4. Owner renews link within 30-day cap -> execution immediately restored!
-        vm.prank(OWNER);
+        vm.prank(AGENT);
         registry.renewAgentLink(AGENT, uint64(block.timestamp + 15 days));
 
         QoreGuardPolicyRegistry.ActionAuthRequest memory restoredReq = _validRequest(1, 500_000, "");
@@ -630,11 +630,11 @@ contract QoreGuardPolicyRegistryTest {
             rotatedPubkey,
             true
         );
-        vm.prank(OWNER);
+        vm.prank(AGENT);
         registry.revokeAgent(AGENT, keccak256("scheduled-rotation"));
         assert(registry.getPolicy(AGENT).revoked == true);
 
-        vm.prank(OWNER);
+        vm.prank(AGENT);
         registry.relinkAgentKey(AGENT, rotatedHash, uint64(block.timestamp + 30 days));
         assert(registry.getPolicy(AGENT).revoked == false);
         assert(registry.getPolicy(AGENT).pqPubkeyHash == rotatedHash);
@@ -653,13 +653,13 @@ contract QoreGuardPolicyRegistryTest {
         address scopedTargetOnly = TARGET_ALLOWED;
         address globalExtraTarget = address(0x3333333333333333333333333333333333333333);
 
-        vm.prank(OWNER);
+        vm.prank(AGENT);
         registry.setTargetAllowed(AGENT, globalExtraTarget, true);
 
         address[] memory winTargets = new address[](1);
         winTargets[0] = scopedTargetOnly;
 
-        vm.prank(OWNER);
+        vm.prank(AGENT);
         registry.openScopedEvmWindow(AGENT, 1010, 1020, 2, 3_000_000, winTargets);
 
         // 1. Before startBlock (1005 < 1010) -> REASON_SCOPED_BLOCK_OUT_OF_RANGE
@@ -810,7 +810,7 @@ contract QoreGuardPolicyRegistryTest {
             bytes4[] memory selectors = new bytes4[](1);
             selectors[0] = SEL_TRANSFER;
 
-            vm.prank(OWNER);
+            vm.prank(signerAgent);
             registry.registerAgentPolicy(
                 QoreGuardPolicyRegistry.RegistrationInput({
                     agent: signerAgent,
@@ -837,5 +837,49 @@ contract QoreGuardPolicyRegistryTest {
         vm.warp(block.timestamp + 30 days + 1);
         (bool expiredValid,) = registry.verifyAgentAuthenticatedMessage(signerAgent, msgIn);
         assert(!expiredValid);
+    }
+
+    // -------------------------------------------------------------------------
+    // 13. First registration must be the agent address itself
+    // -------------------------------------------------------------------------
+    function test_RevertWhenThirdPartyRegistersPolicyForUncontrolledAgent() public {
+        address victim = address(0xBEEF);
+        address[] memory noTargets = new address[](0);
+        bytes4[] memory noSelectors = new bytes4[](0);
+
+        QoreGuardPolicyRegistry.RegistrationInput memory hijack = QoreGuardPolicyRegistry.RegistrationInput({
+            agent: victim,
+            pqPubkeyHash: validPubkeyHash,
+            maxSingleTxAmount: 1_000_000,
+            dailyCapAmount: 2_000_000,
+            windowDuration: 1 days,
+            validUntil: uint64(block.timestamp + 7 days),
+            maxAiRiskLevel: 2,
+            requireOnchainKeyStatus: false,
+            requireAiPrecompile: false,
+            enforceTargetAllowlist: true,
+            enforceSelectorAllowlist: true
+        });
+
+        vm.prank(ATTACKER);
+        vm.expectRevert(QoreGuardPolicyRegistry.AgentNotController.selector);
+        registry.registerAgentPolicy(hijack, noTargets, noSelectors);
+
+        vm.prank(OWNER);
+        vm.expectRevert(QoreGuardPolicyRegistry.AgentNotController.selector);
+        registry.registerAgentPolicy(hijack, noTargets, noSelectors);
+
+        assert(registry.getPolicy(victim).owner == address(0));
+        assert(registry.getPolicy(victim).active == false);
+
+        vm.prank(victim);
+        registry.registerAgentPolicy(hijack, noTargets, noSelectors);
+        assert(registry.getPolicy(victim).owner == victim);
+        assert(registry.getPolicy(victim).active == true);
+
+        vm.prank(ATTACKER);
+        vm.expectRevert(QoreGuardPolicyRegistry.NotPolicyOwner.selector);
+        registry.registerAgentPolicy(hijack, noTargets, noSelectors);
+        assert(registry.getPolicy(victim).owner == victim);
     }
 }

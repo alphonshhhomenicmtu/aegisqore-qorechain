@@ -46,6 +46,9 @@ export interface AgentActionRequest {
   timestamp: string;
 }
 
+/** This page compares digests locally. It does not run an ML-DSA-87 verifier. */
+export type GuardVerificationMode = "deterministic-browser-simulator";
+
 export interface GuardDecision {
   allowed: boolean;
   code:
@@ -60,6 +63,7 @@ export interface GuardDecision {
   signBytesPrefix: string;
   pqKeyType: "NIST FIPS 204 ML-DSA-87 (2,592B pk / 4,627B sig)";
   receiptHash: string;
+  verificationMode: GuardVerificationMode;
 }
 
 export interface TelemetrySnapshot {
@@ -133,49 +137,47 @@ export async function evaluateGuardRequest(
     timestamp: request.timestamp,
   });
   const receiptHash = await sha256Hex(baseReceiptInput);
+  const verificationMode = "deterministic-browser-simulator" as const;
+  const simulatorDecision = (
+    body: Omit<GuardDecision, "signBytesPrefix" | "pqKeyType" | "receiptHash" | "verificationMode">,
+  ): GuardDecision => ({
+    ...body,
+    signBytesPrefix,
+    pqKeyType: "NIST FIPS 204 ML-DSA-87 (2,592B pk / 4,627B sig)",
+    receiptHash,
+    verificationMode,
+  });
 
   if (policy.requirePqHybrid && request.signatureScheme !== "ML-DSA-87+secp256k1") {
-    return {
+    return simulatorDecision({
       allowed: false,
       code: "QUANTUM_DOWNGRADE_BLOCKED",
-      reason: `Quantum downgrade blocked: scheme '${request.signatureScheme}' rejected; policy requires ML-DSA-87+secp256k1 hybrid signing.`,
-      signBytesPrefix,
-      pqKeyType: "NIST FIPS 204 ML-DSA-87 (2,592B pk / 4,627B sig)",
-      receiptHash,
-    };
+      reason: `Deterministic browser simulator: scheme '${request.signatureScheme}' rejected; policy form requires an ML-DSA-87+secp256k1 label. This check did not run a live ML-DSA-87 verifier.`,
+    });
   }
 
   if (usedNonces.has(request.nonce)) {
-    return {
+    return simulatorDecision({
       allowed: false,
       code: "REPLAY_NONCE_BLOCKED",
-      reason: `Replay attack blocked: nonce '${request.nonce}' was already consumed in this EVM window.`,
-      signBytesPrefix,
-      pqKeyType: "NIST FIPS 204 ML-DSA-87 (2,592B pk / 4,627B sig)",
-      receiptHash,
-    };
+      reason: `Deterministic browser simulator: nonce '${request.nonce}' was already consumed in this EVM window.`,
+    });
   }
 
   if (request.providedDigest.toLowerCase() !== request.expectedDigest.toLowerCase()) {
-    return {
+    return simulatorDecision({
       allowed: false,
       code: "TAMPERED_PQ_DIGEST",
-      reason: `Tampered PQ digest detected: provided ${request.providedDigest.slice(0, 14)}... != expected ${request.expectedDigest.slice(0, 14)}...`,
-      signBytesPrefix,
-      pqKeyType: "NIST FIPS 204 ML-DSA-87 (2,592B pk / 4,627B sig)",
-      receiptHash,
-    };
+      reason: `Deterministic browser simulator: digest mismatch (provided ${request.providedDigest.slice(0, 14)}... != expected ${request.expectedDigest.slice(0, 14)}...). This is not live ML-DSA-87 verification.`,
+    });
   }
 
   if (policy.windowBlocksRemaining <= 0) {
-    return {
+    return simulatorDecision({
       allowed: false,
       code: "EVM_WINDOW_EXPIRED",
-      reason: "Scoped EVM window expired: owner must re-authorize with offline ML-DSA-87 key.",
-      signBytesPrefix,
-      pqKeyType: "NIST FIPS 204 ML-DSA-87 (2,592B pk / 4,627B sig)",
-      receiptHash,
-    };
+      reason: "Deterministic browser simulator: scoped EVM window counter is exhausted. This is not live ML-DSA-87 verification.",
+    });
   }
 
   const normalizedAllowedTargets = policy.allowedTargets.map((t) => t.toLowerCase());
@@ -183,14 +185,11 @@ export async function evaluateGuardRequest(
     !policy.allowedTools.includes(request.mcpTool) ||
     !normalizedAllowedTargets.includes(request.targetAddress.toLowerCase())
   ) {
-    return {
+    return simulatorDecision({
       allowed: false,
       code: "ROGUE_TOOL_OR_TARGET_BLOCKED",
-      reason: `Rogue MCP tool/target blocked: tool '${request.mcpTool}' or target '${request.targetAddress}' is outside scoped allowlist.`,
-      signBytesPrefix,
-      pqKeyType: "NIST FIPS 204 ML-DSA-87 (2,592B pk / 4,627B sig)",
-      receiptHash,
-    };
+      reason: `Deterministic browser simulator: tool '${request.mcpTool}' or target '${request.targetAddress}' is outside the scoped allowlist.`,
+    });
   }
 
   if (
@@ -198,24 +197,18 @@ export async function evaluateGuardRequest(
     request.amountQor > policy.perTxCapQor ||
     policy.spentTodayQor + request.amountQor > policy.dailyCapQor
   ) {
-    return {
+    return simulatorDecision({
       allowed: false,
       code: "POLICY_CAP_EXCEEDED",
-      reason: `Policy cap breach: ${request.amountQor} QOR exceeds per-tx cap (${policy.perTxCapQor} QOR) or remaining daily budget (${policy.dailyCapQor - policy.spentTodayQor} QOR).`,
-      signBytesPrefix,
-      pqKeyType: "NIST FIPS 204 ML-DSA-87 (2,592B pk / 4,627B sig)",
-      receiptHash,
-    };
+      reason: `Deterministic browser simulator: ${request.amountQor} QOR exceeds per-tx cap (${policy.perTxCapQor} QOR) or remaining daily budget (${policy.dailyCapQor - policy.spentTodayQor} QOR).`,
+    });
   }
 
-  return {
+  return simulatorDecision({
     allowed: true,
     code: "APPROVED",
-    reason: `Approved & signed with ML-DSA-87+secp256k1: ${request.amountQor} QOR via ${request.mcpTool} within scoped EVM window.`,
-    signBytesPrefix,
-    pqKeyType: "NIST FIPS 204 ML-DSA-87 (2,592B pk / 4,627B sig)",
-    receiptHash,
-  };
+    reason: `Deterministic browser simulator: digest bytes match on this request. Not live ML-DSA-87 verification. ${request.amountQor} QOR via ${request.mcpTool} fits the scoped policy window.`,
+  });
 }
 
 export async function fetchQoreTestnetTelemetry(): Promise<TelemetrySnapshot> {

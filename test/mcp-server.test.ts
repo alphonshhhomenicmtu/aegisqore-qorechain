@@ -155,4 +155,66 @@ describe("qoreguard-mcp Server (InMemory MCP Client/Server Round-Trip)", () => {
     const txt = (res.content as Array<{ text: string }>)[0]?.text ?? "";
     expect(txt).toContain("SECRET_INPUT_REFUSED");
   });
+
+  it("rejects a stale MCP nowUnix and does not un-expire the intent on the wall clock", async () => {
+    const { client: c, handle } = await connectMcp();
+    const historical = 1_700_000_000;
+    const env = createSignedAgentEnvelope(handle.getEngine(), handle.demoIdentity, {
+      to: "0x000000000000000000000000000000000000dEaD",
+      valueUqor: "1000",
+      expiresAtUnix: historical + 30,
+    });
+
+    const backdated = await c.callTool({
+      name: "quote_policy_decision",
+      arguments: { envelope: env, nowUnix: historical },
+    });
+    expect(backdated.isError).toBe(true);
+    const backdatedText = (backdated.content as Array<{ text: string }>)[0]?.text ?? "";
+    expect(backdatedText).toContain("STALE_EVALUATION_CLOCK");
+
+    const verifyBackdated = await c.callTool({
+      name: "verify_pq_tx",
+      arguments: { envelope: env, commit: true, nowUnix: historical },
+    });
+    expect(verifyBackdated.isError).toBe(true);
+    expect(handle.getEngine().getLastNonce()).toBe(0);
+
+    const live = await c.callTool({
+      name: "quote_policy_decision",
+      arguments: { envelope: env },
+    });
+    expect(live.isError).toBeFalsy();
+    const body = live.structuredContent as { verdict: string; decision: { rejectionCodes: string[] } };
+    expect(body.verdict).toBe("DENY");
+    expect(body.decision.rejectionCodes).toContain("INTENT_EXPIRED");
+  });
+
+  it("rejects a future MCP nowUnix that would postpone expiry", async () => {
+    const { client: c, handle } = await connectMcp();
+    const wall = Math.floor(Date.now() / 1000);
+    const env = createSignedAgentEnvelope(handle.getEngine(), handle.demoIdentity, {
+      to: "0x000000000000000000000000000000000000dEaD",
+      valueUqor: "1000",
+      expiresAtUnix: wall - 5,
+    });
+    const res = await c.callTool({
+      name: "quote_policy_decision",
+      arguments: { envelope: env, nowUnix: wall + 86_400 },
+    });
+    expect(res.isError).toBe(true);
+    const text = (res.content as Array<{ text: string }>)[0]?.text ?? "";
+    expect(text).toContain("STALE_EVALUATION_CLOCK");
+  });
+
+  it("does not expose test-clock injection on MCP tool schemas", async () => {
+    const { client: c } = await connectMcp();
+    const { tools } = await c.listTools();
+    const blob = JSON.stringify(tools);
+    expect(blob).not.toContain("allowTestClock");
+    const quote = tools.find((tool) => tool.name === "quote_policy_decision");
+    const verify = tools.find((tool) => tool.name === "verify_pq_tx");
+    expect(JSON.stringify(quote)).toContain("wall clock");
+    expect(JSON.stringify(verify)).toContain("wall clock");
+  });
 });

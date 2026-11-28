@@ -173,6 +173,10 @@ export default function App() {
           <p>
             QoreChain Developer Fest (Post-Quantum AI Agents) &bull; Scoped EVM
             Window &bull; ML-DSA-87 + secp256k1 Hybrid Signing
+            <br />
+            Browser guard on this page is deterministic simulator mode: it
+            compares the supplied digest with the expected digest. It does not
+            run live ML-DSA-87 verification.
           </p>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -371,8 +375,10 @@ export default function App() {
           <div className="trace-list">
             {traces.length === 0 && (
               <div className="muted">
-                No guard evaluations yet. Trigger any scenario above to inspect
-                PQ signature verification and SHA-256 tamper-evident receipts.
+                No guard evaluations yet. Trigger any scenario above. Results are
+                labeled deterministic browser simulator mode (digest compare
+                only), with a SHA-256 receipt. They are not a live ML-DSA-87
+                verifier.
               </div>
             )}
             {traces.map(({ request, decision }) => (
@@ -402,7 +408,7 @@ export default function App() {
                   <span className="mono muted">{decision.code}</span>
                 </div>
                 <div className="muted" style={{ marginTop: 6, fontSize: "0.84rem" }}>
-                  {decision.reason}
+                  Mode: {decision.verificationMode}. {decision.reason}
                 </div>
                 <div className="mono muted" style={{ marginTop: 6, fontSize: "0.76rem" }}>
                   SignBytes: {decision.signBytesPrefix}

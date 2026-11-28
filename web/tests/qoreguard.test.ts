@@ -38,6 +38,10 @@ describe("QoreGuard PQ Policy & 5-Scenario Adversarial Breaker Lab", () => {
     expect(res.allowed).toBe(true);
     expect(res.code).toBe("APPROVED");
     expect(res.receiptHash).toMatch(/^0x[a-f0-9]{64}$/);
+    expect(res.verificationMode).toBe("deterministic-browser-simulator");
+    expect(res.reason.toLowerCase()).toContain("simulator");
+    expect(res.reason.toLowerCase()).toContain("not live ml-dsa-87 verification");
+    expect(res.reason).not.toContain("Approved & signed");
   });
 
   it("Scenario 1: blocks Quantum Downgrade Attack (ECDSA-only)", async () => {
@@ -105,6 +109,21 @@ describe("QoreGuard PQ Policy & 5-Scenario Adversarial Breaker Lab", () => {
     );
     expect(res.allowed).toBe(false);
     expect(res.code).toBe("EVM_WINDOW_EXPIRED");
+  });
+
+  it("labels every digest outcome as a browser simulator and never claims a live ML-DSA-87 verifier ran", async () => {
+    const approved = await evaluateGuardRequest(DEFAULT_POLICY, await makeValidRequest("nonce-sim-ok"), new Set());
+    expect(approved.verificationMode).toBe("deterministic-browser-simulator");
+    expect(approved.reason).not.toMatch(/verified with ML-DSA-87/i);
+    expect(approved.reason).not.toContain("Approved & signed");
+
+    const tampered = await makeValidRequest("nonce-sim-bad");
+    tampered.providedDigest = `0x${"a".repeat(64)}`;
+    const denied = await evaluateGuardRequest(DEFAULT_POLICY, tampered, new Set());
+    expect(denied.code).toBe("TAMPERED_PQ_DIGEST");
+    expect(denied.verificationMode).toBe("deterministic-browser-simulator");
+    expect(denied.reason.toLowerCase()).toContain("not live ml-dsa-87 verification");
+    expect(denied.reason).not.toContain("Approved & signed");
   });
 
   it("initializes telemetry from verified live Diana snapshot (#10,801,813) with zero auto-mount fetches", () => {

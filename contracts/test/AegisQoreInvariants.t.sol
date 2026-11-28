@@ -208,7 +208,7 @@ contract AegisQoreHandler {
 
     /// @notice Exercises owner-only emergency revocation (`revokeAgent`) vs unauthorized attacker attempt.
     function revokeAgent(bool asAttacker) external {
-        address caller = asAttacker ? ATTACKER : OWNER;
+        address caller = asAttacker ? ATTACKER : AGENT;
         vm.prank(caller);
         try registry.revokeAgent(AGENT, keccak256("INVARIANT_PAUSE")) {
             if (asAttacker) {
@@ -223,7 +223,7 @@ contract AegisQoreHandler {
     function linkAgent(uint256 ttlSeed, bool rotateKey, bool asAttacker) external {
         uint64 ttl = uint64((ttlSeed % 45 days) + 1); // includes >30d invalid TTLs
         uint64 newExpiry = uint64(block.timestamp) + ttl;
-        address caller = asAttacker ? ATTACKER : OWNER;
+        address caller = asAttacker ? ATTACKER : AGENT;
 
         vm.prank(caller);
         if (rotateKey) {
@@ -256,7 +256,7 @@ contract AegisQoreHandler {
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = SEL_TRANSFER;
 
-        address caller = asAttacker ? ATTACKER : OWNER;
+        address caller = asAttacker ? ATTACKER : AGENT;
         vm.prank(caller);
         try registry.registerAgentPolicy(
             QoreGuardPolicyRegistry.RegistrationInput({
@@ -285,7 +285,7 @@ contract AegisQoreHandler {
 
     /// @notice Exercises `openScopedEvmWindow` and `closeScopedEvmWindow`.
     function toggleScopedWindow(bool openWindow, uint64 blockSpanSeed, uint64 maxTxSeed, uint256 maxValSeed) external {
-        vm.prank(OWNER);
+        vm.prank(AGENT);
         if (openWindow) {
             uint64 span = (blockSpanSeed % 40) + 1;
             uint64 maxTx = (maxTxSeed % 5) + 1;
@@ -406,7 +406,7 @@ contract AegisQoreInvariantsTest {
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = 0xa9059cbb; // transfer
 
-        vm.prank(handler.OWNER());
+        vm.prank(handler.AGENT());
         registry.registerAgentPolicy(
             QoreGuardPolicyRegistry.RegistrationInput({
                 agent: agent,
@@ -458,7 +458,8 @@ contract AegisQoreInvariantsTest {
     function invariant_onlyOwnerAndMlDsa87Enforced() public view {
         assert(handler.ghost_unauthorizedOwnerOps() == 0);
         assert(handler.ghost_weakAlgSuccesses() == 0);
-        assert(registry.getPolicy(handler.AGENT()).owner == handler.OWNER());
+        assert(registry.getPolicy(handler.AGENT()).owner == handler.AGENT());
+        assert(registry.getPolicy(handler.AGENT()).owner != handler.OWNER());
     }
 
     /// @notice Invariant (e): Scoped EVM Windows strictly bound block height, tx count, and cumulative value.

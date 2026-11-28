@@ -7,6 +7,7 @@ import { MAX_AGENT_LINK_TTL_SEC } from "../src/networks.js";
 import {
   createSignedAgentEnvelope,
   QoreGuardPolicyEngine,
+  StaleEvaluationClockError,
   verifyAuditBundle,
 } from "../src/policy-engine.js";
 import type { QuantumAttackVector } from "../src/types.js";
@@ -36,13 +37,13 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
       expiresAtUnix: now + 300,
     });
 
-    const quote = engine.quoteDecision(env, { nowUnix: now });
+    const quote = engine.quoteDecision(env, { allowTestClock: true, nowUnix: now });
     expect(quote.verdict).toBe("ALLOW");
     expect(quote.committed).toBe(false);
     expect(engine.getLastNonce()).toBe(0);
     expect(engine.getAuditLog().length).toBe(0);
 
-    const committed = engine.verifyAndCommit(env, { nowUnix: now });
+    const committed = engine.verifyAndCommit(env, { allowTestClock: true, nowUnix: now });
     expect(committed.verdict).toBe("ALLOW");
     expect(committed.committed).toBe(true);
     expect(engine.getLastNonce()).toBe(1);
@@ -58,7 +59,7 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
       expiresAtUnix: now + 300,
     });
 
-    const res = engine.verifyAndCommit(overCap, { nowUnix: now });
+    const res = engine.verifyAndCommit(overCap, { allowTestClock: true, nowUnix: now });
     expect(res.verdict).toBe("DENY");
     expect(res.committed).toBe(false);
     expect(res.rejectionCodes).toContain("SPEND_CAP_EXCEEDED");
@@ -77,16 +78,16 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
 
     // Tx 1: 3M uqor -> ALLOW (3M/5M)
     const e1 = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "3000000", nonce: 1, expiresAtUnix: t0 + 1000 });
-    expect(engine.verifyAndCommit(e1, { nowUnix: t0 }).verdict).toBe("ALLOW");
+    expect(engine.verifyAndCommit(e1, { allowTestClock: true, nowUnix: t0 }).verdict).toBe("ALLOW");
 
     // Tx 2 at t0+60s: 2.5M uqor -> DENY (5.5M > 5M)
     const e2 = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "2500000", nonce: 2, expiresAtUnix: t0 + 1000 });
-    const d2 = engine.verifyAndCommit(e2, { nowUnix: t0 + 60 });
+    const d2 = engine.verifyAndCommit(e2, { allowTestClock: true, nowUnix: t0 + 60 });
     expect(d2.verdict).toBe("DENY");
     expect(d2.rejectionCodes).toContain("VELOCITY_SPEND_EXCEEDED");
 
     // Same Tx 2 at t0+301s (window rolled past t0) -> ALLOW!
-    const d2After = engine.verifyAndCommit(e2, { nowUnix: t0 + 301 });
+    const d2After = engine.verifyAndCommit(e2, { allowTestClock: true, nowUnix: t0 + 301 });
     expect(d2After.verdict).toBe("ALLOW");
     expect(engine.getLastNonce()).toBe(2);
   });
@@ -98,10 +99,10 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
     const t0 = 1_760_000_000;
     for (let n = 1; n <= 2; n++) {
       const e = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "100", nonce: n, expiresAtUnix: t0 + 300 });
-      expect(engine.verifyAndCommit(e, { nowUnix: t0 + n }).verdict).toBe("ALLOW");
+      expect(engine.verifyAndCommit(e, { allowTestClock: true, nowUnix: t0 + n }).verdict).toBe("ALLOW");
     }
     const e3 = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "100", nonce: 3, expiresAtUnix: t0 + 300 });
-    const d3 = engine.verifyAndCommit(e3, { nowUnix: t0 + 10 });
+    const d3 = engine.verifyAndCommit(e3, { allowTestClock: true, nowUnix: t0 + 10 });
     expect(d3.verdict).toBe("DENY");
     expect(d3.rejectionCodes).toContain("VELOCITY_COUNT_EXCEEDED");
   });
@@ -111,13 +112,13 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
     const now = 1_760_000_000;
 
     const eUnknown = createSignedAgentEnvelope(engine, id, { to: TARGET_UNKNOWN, valueUqor: "1000", expiresAtUnix: now + 300 });
-    expect(engine.quoteDecision(eUnknown, { nowUnix: now }).rejectionCodes).toContain("TARGET_NOT_ALLOWLISTED");
+    expect(engine.quoteDecision(eUnknown, { allowTestClock: true, nowUnix: now }).rejectionCodes).toContain("TARGET_NOT_ALLOWLISTED");
 
     const eDenied = createSignedAgentEnvelope(engine, id, { to: TARGET_DENIED, valueUqor: "1000", expiresAtUnix: now + 300 });
-    expect(engine.quoteDecision(eDenied, { nowUnix: now }).rejectionCodes).toContain("TARGET_DENYLISTED");
+    expect(engine.quoteDecision(eDenied, { allowTestClock: true, nowUnix: now }).rejectionCodes).toContain("TARGET_DENYLISTED");
 
     const eSecond = createSignedAgentEnvelope(engine, id, { to: TARGET_SECOND, valueUqor: "1000", expiresAtUnix: now + 300 });
-    expect(engine.quoteDecision(eSecond, { nowUnix: now }).verdict).toBe("ALLOW");
+    expect(engine.quoteDecision(eSecond, { allowTestClock: true, nowUnix: now }).verdict).toBe("ALLOW");
   });
 
   it("blocks forbidden EVM calldata selectors (approve / setApprovalForAll) and enforces allowedSelectors", () => {
@@ -133,7 +134,7 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
       calldataHex: "0x095ea7b30000000000000000000000001111111111111111111111111111111111111111",
       expiresAtUnix: now + 300,
     });
-    const dApprove = engine.quoteDecision(approveCall, { nowUnix: now });
+    const dApprove = engine.quoteDecision(approveCall, { allowTestClock: true, nowUnix: now });
     expect(dApprove.verdict).toBe("DENY");
     expect(dApprove.rejectionCodes).toContain("SELECTOR_FORBIDDEN");
     expect(dApprove.rejectionCodes).toContain("SELECTOR_NOT_ALLOWED");
@@ -144,7 +145,7 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
       calldataHex: "0xa9059cbb0000000000000000000000001111111111111111111111111111111111111111",
       expiresAtUnix: now + 300,
     });
-    expect(engine.quoteDecision(transferCall, { nowUnix: now }).verdict).toBe("ALLOW");
+    expect(engine.quoteDecision(transferCall, { allowTestClock: true, nowUnix: now }).verdict).toBe("ALLOW");
   });
 
   it("enforces IQoreAI risk level threshold and anomaly flag", () => {
@@ -153,7 +154,7 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
     const env = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "10000", expiresAtUnix: now + 300 });
 
     const highRisk = engine.quoteDecision(env, {
-      nowUnix: now,
+      allowTestClock: true, nowUnix: now,
       aiSignal: { riskScore: 88, riskLevel: 3, anomalyFlagged: true, source: "onchain-precompile" },
     });
     expect(highRisk.verdict).toBe("DENY");
@@ -161,7 +162,7 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
     expect(highRisk.rejectionCodes).toContain("AI_ANOMALY_FLAGGED");
 
     const safe = engine.quoteDecision(env, {
-      nowUnix: now,
+      allowTestClock: true, nowUnix: now,
       aiSignal: { riskScore: 12, riskLevel: 1, anomalyFlagged: false, source: "onchain-precompile" },
     });
     expect(safe.verdict).toBe("ALLOW");
@@ -173,14 +174,14 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
 
     // Nonce 2 before nonce 1 -> NONCE_OUT_OF_ORDER
     const eSkip = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "100", nonce: 2, expiresAtUnix: now + 300 });
-    expect(engine.verifyAndCommit(eSkip, { nowUnix: now }).rejectionCodes).toContain("NONCE_OUT_OF_ORDER");
+    expect(engine.verifyAndCommit(eSkip, { allowTestClock: true, nowUnix: now }).rejectionCodes).toContain("NONCE_OUT_OF_ORDER");
 
     // Nonce 1 -> ALLOW
     const e1 = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "100", nonce: 1, expiresAtUnix: now + 300 });
-    expect(engine.verifyAndCommit(e1, { nowUnix: now }).verdict).toBe("ALLOW");
+    expect(engine.verifyAndCommit(e1, { allowTestClock: true, nowUnix: now }).verdict).toBe("ALLOW");
 
     // Replaying nonce 1 -> NONCE_REPLAY
-    const dReplay = engine.verifyAndCommit(e1, { nowUnix: now });
+    const dReplay = engine.verifyAndCommit(e1, { allowTestClock: true, nowUnix: now });
     expect(dReplay.verdict).toBe("DENY");
     expect(dReplay.rejectionCodes).toContain("NONCE_REPLAY");
   });
@@ -190,7 +191,7 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
     const now = 1_760_000_000;
 
     const expired = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "100", expiresAtUnix: now - 10 });
-    expect(engine.quoteDecision(expired, { nowUnix: now }).rejectionCodes).toContain("INTENT_EXPIRED");
+    expect(engine.quoteDecision(expired, { allowTestClock: true, nowUnix: now }).rejectionCodes).toContain("INTENT_EXPIRED");
 
     const wrongChain = signHybridIntent(id, {
       agentId: "wrong-agent",
@@ -204,7 +205,7 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
       nonce: 1,
       expiresAtUnix: now + 300,
     });
-    const d = engine.quoteDecision(wrongChain, { nowUnix: now });
+    const d = engine.quoteDecision(wrongChain, { allowTestClock: true, nowUnix: now });
     expect(d.verdict).toBe("DENY");
     expect(d.rejectionCodes).toContain("CHAIN_ID_MISMATCH");
     expect(d.rejectionCodes).toContain("POLICY_HASH_MISMATCH");
@@ -230,7 +231,7 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
     ];
 
     for (const vector of vectors) {
-      const sim = engine.simulateQuantumDowngradeAttack(valid, vector, { nowUnix: now });
+      const sim = engine.simulateQuantumDowngradeAttack(valid, vector, { allowTestClock: true, nowUnix: now });
       expect(sim.blocked, `vector ${vector} should be blocked`).toBe(true);
       expect(sim.decision.verdict).toBe("DENY");
     }
@@ -245,10 +246,10 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
 
     // Entry 1: ALLOW
     const e1 = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "100000", nonce: 1, expiresAtUnix: now + 300 });
-    engine.verifyAndCommit(e1, { nowUnix: now });
+    engine.verifyAndCommit(e1, { allowTestClock: true, nowUnix: now });
     // Entry 2: DENY (classical downgrade)
     const downgraded = signHybridIntent(id, { ...e1.intent, nonce: 2 }, { signatureTier: "classical-only" });
-    engine.verifyAndCommit(downgraded, { nowUnix: now + 5 });
+    engine.verifyAndCommit(downgraded, { allowTestClock: true, nowUnix: now + 5 });
 
     const bundle = engine.exportAuditBundle(id, now + 10);
     expect(bundle.entryCount).toBe(2);
@@ -305,8 +306,8 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
     });
 
     // Cannot renew > 30 days or from wrong owner
-    expect(() => engine.renewAgentLink(owner, t0 + MAX_AGENT_LINK_TTL_SEC + 10, t0)).toThrow(RangeError);
-    expect(() => engine.renewAgentLink("0x1234", t0 + 86_400, t0)).toThrow();
+    expect(() => engine.renewAgentLink(owner, t0 + MAX_AGENT_LINK_TTL_SEC + 10, t0, true)).toThrow(RangeError);
+    expect(() => engine.renewAgentLink("0x1234", t0 + 86_400, t0, true)).toThrow();
 
     // Past 30-day TTL -> AGENT_LINK_EXPIRED
     const expiredAt = t0 + MAX_AGENT_LINK_TTL_SEC + 1;
@@ -316,14 +317,14 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
       nonce: 1,
       expiresAtUnix: expiredAt + 600,
     });
-    const denied = engine.verifyAndCommit(env1, { nowUnix: expiredAt });
+    const denied = engine.verifyAndCommit(env1, { allowTestClock: true, nowUnix: expiredAt });
     expect(denied.verdict).toBe("DENY");
     expect(denied.rejectionCodes).toContain("AGENT_LINK_EXPIRED");
     expect(engine.getLastNonce()).toBe(0);
 
     // Owner renews within 30 days -> execution immediately succeeds!
-    engine.renewAgentLink(owner, expiredAt + 14 * 86_400, expiredAt);
-    const restored = engine.verifyAndCommit(env1, { nowUnix: expiredAt + 1 });
+    engine.renewAgentLink(owner, expiredAt + 14 * 86_400, expiredAt, true);
+    const restored = engine.verifyAndCommit(env1, { allowTestClock: true, nowUnix: expiredAt + 1 });
     expect(restored.verdict).toBe("ALLOW");
     expect(engine.getLastNonce()).toBe(1);
 
@@ -335,9 +336,9 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
       nonce: 2,
       expiresAtUnix: expiredAt + 600,
     });
-    expect(engine.quoteDecision(env2, { nowUnix: expiredAt + 2 }).rejectionCodes).toContain("AGENT_REVOKED");
-    engine.renewAgentLink(owner, expiredAt + 30 * 86_400, expiredAt + 2);
-    expect(engine.verifyAndCommit(env2, { nowUnix: expiredAt + 3 }).verdict).toBe("ALLOW");
+    expect(engine.quoteDecision(env2, { allowTestClock: true, nowUnix: expiredAt + 2 }).rejectionCodes).toContain("AGENT_REVOKED");
+    engine.renewAgentLink(owner, expiredAt + 30 * 86_400, expiredAt + 2, true);
+    expect(engine.verifyAndCommit(env2, { allowTestClock: true, nowUnix: expiredAt + 3 }).verdict).toBe("ALLOW");
   });
 
   it("enforces Scoped EVM Window bounds (startBlock, endBlock, maxTxCount, maxTotalValue, allowedTargets)", () => {
@@ -353,33 +354,97 @@ describe("QoreGuardPolicyEngine — Scoped Policy, Velocity, Replay & Adversaria
 
     const e1 = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "1000000", nonce: 1, expiresAtUnix: now + 600 });
     // Out-of-window block (99 < 100)
-    expect(engine.quoteDecision(e1, { nowUnix: now, blockNumber: 99 }).rejectionCodes).toContain(
+    expect(engine.quoteDecision(e1, { allowTestClock: true, nowUnix: now, blockNumber: 99 }).rejectionCodes).toContain(
       "SCOPED_EVM_BLOCK_OUT_OF_RANGE",
     );
 
     // Target outside window's allowedTargets (even though TARGET_SECOND is globally allowlisted)
     const eTarget = createSignedAgentEnvelope(engine, id, { to: TARGET_SECOND, valueUqor: "100000", nonce: 1, expiresAtUnix: now + 600 });
-    expect(engine.quoteDecision(eTarget, { nowUnix: now, blockNumber: 105 }).rejectionCodes).toContain(
+    expect(engine.quoteDecision(eTarget, { allowTestClock: true, nowUnix: now, blockNumber: 105 }).rejectionCodes).toContain(
       "TARGET_NOT_ALLOWLISTED",
     );
 
     // Tx 1 (1M uqor) at block 105 -> ALLOW
-    expect(engine.verifyAndCommit(e1, { nowUnix: now, blockNumber: 105 }).verdict).toBe("ALLOW");
+    expect(engine.verifyAndCommit(e1, { allowTestClock: true, nowUnix: now, blockNumber: 105 }).verdict).toBe("ALLOW");
 
     // Tx 2 of 600k uqor -> 1.6M > 1.5M -> SCOPED_EVM_VALUE_EXCEEDED
     const eOverVal = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "600000", nonce: 2, expiresAtUnix: now + 600 });
-    expect(engine.quoteDecision(eOverVal, { nowUnix: now, blockNumber: 106 }).rejectionCodes).toContain(
+    expect(engine.quoteDecision(eOverVal, { allowTestClock: true, nowUnix: now, blockNumber: 106 }).rejectionCodes).toContain(
       "SCOPED_EVM_VALUE_EXCEEDED",
     );
 
     // Tx 2 of 500k uqor -> 1.5M <= 1.5M, count=2 <= 2 -> ALLOW
     const e2 = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "500000", nonce: 2, expiresAtUnix: now + 600 });
-    expect(engine.verifyAndCommit(e2, { nowUnix: now, blockNumber: 106 }).verdict).toBe("ALLOW");
+    expect(engine.verifyAndCommit(e2, { allowTestClock: true, nowUnix: now, blockNumber: 106 }).verdict).toBe("ALLOW");
 
     // Tx 3 of 0 uqor -> count=3 > 2 -> SCOPED_EVM_TX_COUNT_EXCEEDED
     const e3 = createSignedAgentEnvelope(engine, id, { to: TARGET_ALLOWED, valueUqor: "0", nonce: 3, expiresAtUnix: now + 600 });
-    expect(engine.quoteDecision(e3, { nowUnix: now, blockNumber: 107 }).rejectionCodes).toContain(
+    expect(engine.quoteDecision(e3, { allowTestClock: true, nowUnix: now, blockNumber: 107 }).rejectionCodes).toContain(
       "SCOPED_EVM_TX_COUNT_EXCEEDED",
     );
+  });
+
+  it("rejects a stale nowUnix that would un-expire an intent unless allowTestClock is set", () => {
+    const { id, engine } = setupEngine();
+    const historical = 1_700_000_000;
+    const env = createSignedAgentEnvelope(engine, id, {
+      to: TARGET_ALLOWED,
+      valueUqor: "1000",
+      expiresAtUnix: historical + 60,
+    });
+
+    expect(() => engine.quoteDecision(env, { nowUnix: historical })).toThrow(StaleEvaluationClockError);
+    expect(() => engine.verifyAndCommit(env, { nowUnix: historical })).toThrow(StaleEvaluationClockError);
+    expect(engine.getLastNonce()).toBe(0);
+
+    const live = engine.quoteDecision(env);
+    expect(live.verdict).toBe("DENY");
+    expect(live.rejectionCodes).toContain("INTENT_EXPIRED");
+
+    const injected = engine.quoteDecision(env, { nowUnix: historical, allowTestClock: true });
+    expect(injected.verdict).toBe("ALLOW");
+    expect(injected.evaluatedAtUnix).toBe(historical);
+  });
+
+  it("rejects a future nowUnix that would delay intent expiry", () => {
+    const { id, engine } = setupEngine();
+    const wall = Math.floor(Date.now() / 1000);
+    const env = createSignedAgentEnvelope(engine, id, {
+      to: TARGET_ALLOWED,
+      valueUqor: "1000",
+      expiresAtUnix: wall - 5,
+    });
+    expect(() => engine.quoteDecision(env, { nowUnix: wall + 86_400 })).toThrow(StaleEvaluationClockError);
+    const atWall = engine.quoteDecision(env);
+    expect(atWall.rejectionCodes).toContain("INTENT_EXPIRED");
+  });
+
+  it("clamps a near-now caller timestamp to the wall clock so a small backdate cannot un-expire", () => {
+    const { id, engine } = setupEngine();
+    const wall = Math.floor(Date.now() / 1000);
+    const env = createSignedAgentEnvelope(engine, id, {
+      to: TARGET_ALLOWED,
+      valueUqor: "1000",
+      expiresAtUnix: wall - 2,
+    });
+    const decision = engine.quoteDecision(env, { nowUnix: wall - 10 });
+    expect(decision.rejectionCodes).toContain("INTENT_EXPIRED");
+    expect(decision.evaluatedAtUnix).toBeGreaterThanOrEqual(wall);
+    expect(decision.evaluatedAtUnix).toBeLessThanOrEqual(wall + 2);
+  });
+
+  it("renewAgentLink rejects a backdated nowUnix without test-clock injection", () => {
+    const owner = "0x9999999999999999999999999999999999999999";
+    const wall = Math.floor(Date.now() / 1000);
+    const { engine } = setupEngine({
+      agentLink: {
+        ownerAddress: owner,
+        linkedAtUnix: wall - 100,
+        expiresAtUnix: wall + 1_000,
+      },
+    });
+    expect(() => engine.renewAgentLink(owner, wall + 86_400, 1_700_000_000)).toThrow(StaleEvaluationClockError);
+    expect(() => engine.getAgentLinkStatus(1_700_000_000)).toThrow(StaleEvaluationClockError);
+    expect(engine.getAgentLinkStatus().expired).toBe(false);
   });
 });
