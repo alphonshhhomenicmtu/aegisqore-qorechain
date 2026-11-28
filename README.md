@@ -26,7 +26,7 @@ Running `npm run probe:testnet` executes a real read-only probe against **QoreCh
   - Enforces **30-day maximum owner-to-agent link TTL** (`MAX_LINK_TTL = 30 days`, `renewAgentLink()`, `relinkAgentKey()`), **Scoped EVM Windows** (`openScopedEvmWindow(agent, startBlock, endBlock, maxTxCount, maxTotalValue, windowTargets)`), official **`qorechain-msg-v1|<chainId>|<data>`** hybrid `secp256k1 + ML-DSA-87` message verification (`verifyAuthenticatedMessage` & `verifyAgentAuthenticatedMessage`), per-tx & O(1) two-epoch sliding-window daily caps, target/selector allowlists (default-blocking `approve` and `setApprovalForAll`), strict monotonic nonces, emergency owner revocation, and tamper-evident `PolicyApproved` / `PolicyRejected` / `AgentRevoked` events.
   - **Live QoreX EVM 9800 Dry-Run Gas Estimate (`npm run deploy:registry -- --dry-run`)**: **`3,480,337` gas** (`0.3915379125 QOR` @ `112.5 gwei`, block `10,811,099`, `15,896`-byte Solc `0.8.28` `paris` creation bytecode, SHA-256 `7c304cb1...87c2cdce`).
   - **Static Security Audit (`Slither 0.11.6`, 102 detectors)**: **`0 High / 0 Medium / 0 Optimization`** findings.
-- **Automated Test Suites**: **68 / 68 PASS** (`24/24` Foundry: `18/18` unit/fuzz + `6/6` stateful invariants across `256` runs / `8,192` fuzz calls + `36/36` core Vitest incl. InMemory MCP round-trip + `8/8` web Vitest)
+- **Automated Test Suites**: **72 / 72 PASS** (`20/20` Foundry, including the 256-run spend-cap fuzz and one invariant suite at 256 runs / 8,192 calls with 0 reverts, + `43/43` core Vitest incl. InMemory MCP round-trip + `9/9` web Vitest)
 
 ---
 
@@ -46,8 +46,8 @@ aegisqore-qorechain/
 ├── contracts/
 │   ├── QoreGuardPolicyRegistry.sol        # On-chain QoreX EVM 9800 PQ Agent Policy Registry (0x...0A01/0A02/0B01/0B02)
 │   └── test/
-│       ├── QoreGuardPolicyRegistry.t.sol  # 18 Foundry tests (vm.etch precompiles, 30d TTL, Scoped EVM Window, qorechain-msg-v1, fuzz)
-│       └── AegisQoreInvariants.t.sol      # 6 stateful Foundry invariants (256 runs / 8,192 calls: caps, 30d TTL, replay, owner/ML-DSA-87)
+│       ├── QoreGuardPolicyRegistry.t.sol  # 19 Foundry tests (vm.etch precompiles, 30d TTL, Scoped EVM Window, qorechain-msg-v1, fuzz, AgentNotController)
+│       └── AegisQoreInvariants.t.sol      # 1 Foundry suite, 6 properties (256 runs / 8,192 calls). Forge reports both files as 20/20.
 ├── foundry.toml                           # Solc 0.8.28 (paris, optimizer=200) + QoreChain RPC endpoints
 ├── src/
 │   ├── contracts/registry-artifact.ts     # Compiled QoreGuardPolicyRegistry ABI + verified creation bytecode
@@ -65,8 +65,8 @@ aegisqore-qorechain/
 │       ├── deploy-registry.ts   # `npm run deploy:registry -- --dry-run` live EVM 9800 gas estimator & turnkey deployer
 │       ├── testnet-probe.ts     # `npm run probe:testnet` live QoreX read-only probe
 │       └── turnkey-tx.ts        # `npm run tx:turnkey` env-var-driven guarded tx / dry-run demo
-├── test/                        # 36 Vitest tests (crypto + qorechain-msg-v1, policy-engine + 30d TTL + Scoped Window, MCP, testnet, deployer)
-├── web/                         # Interactive React 19 + Vite 6 + TypeScript console deployed to GitHub Pages (8 Vitest tests)
+├── test/                        # 43 Vitest tests (crypto + qorechain-msg-v1, policy-engine + 30d TTL + Scoped Window, MCP, testnet, deployer)
+├── web/                         # Interactive React 19 + Vite 6 + TypeScript console deployed to GitHub Pages (9 Vitest tests)
 ├── docs/
 │   ├── cover-image.png          # 1200x630 Featured Cover Image for AegisQore QoreChain submission
 │   ├── aegisqore-deck.pdf       # 8-slide 16:9 Judge Pitch Deck PDF
@@ -94,7 +94,7 @@ Aligned with `@qorechain/mcp` (`structuredContent` + JSON content + secret-input
 
 ## Quickstart & Reproducibility
 
-### Core SDK, Policy Engine & MCP Server (`36 / 36` Vitest PASS)
+### Core SDK, Policy Engine & MCP Server (`43 / 43` Vitest PASS)
 
 ```bash
 npm install
@@ -103,7 +103,7 @@ npm run build
 npm test
 ```
 
-### On-Chain Smart Contract (`24 / 24` Foundry PASS, Slither `0 High / 0 Medium`)
+### On-Chain Smart Contract (`20 / 20` Foundry PASS, including fuzz and the invariant suite, Slither `0 High / 0 Medium`)
 
 ```bash
 forge build
@@ -130,7 +130,7 @@ npm run tx:turnkey
 node dist/mcp/bin.js --network testnet
 ```
 
-### Interactive Web Console (`8 / 8` Vitest PASS)
+### Interactive Web Console (`9 / 9` Vitest PASS)
 
 ```bash
 cd web
